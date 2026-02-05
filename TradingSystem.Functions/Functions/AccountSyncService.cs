@@ -1,5 +1,6 @@
 ﻿using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
+using TradingSystem.Functions.Models;
 using TradingSystem.Functions.Services.Interfaces;
 
 namespace TradingSystem.Functions.Functions
@@ -14,17 +15,24 @@ namespace TradingSystem.Functions.Functions
         private readonly IAlpacaAccountService _alpacaService;
         private readonly IPortfolioService _portfolioService;
         private readonly IEmailService _emailService;
+        private readonly ITableStorageService _tableStorageService;
+
+        // Risk thresholds
+        private const decimal DRAWDOWN_WARNING_THRESHOLD = -15.0m;  // 15% drawdown - early warning
+        private const decimal DRAWDOWN_HALT_THRESHOLD = -20.0m;    // 20% drawdown - halt trading
 
         public AccountSyncService(
             ILogger<AccountSyncService> logger,
             IAlpacaAccountService alpacaService,
             IPortfolioService portfolioService,
-            IEmailService emailService)
+            IEmailService emailService,
+            ITableStorageService tableStorageService)
         {
             _logger = logger;
             _alpacaService = alpacaService;
             _portfolioService = portfolioService;
             _emailService = emailService;
+            _tableStorageService = tableStorageService;
         }
 
         /// <summary>
@@ -34,44 +42,60 @@ namespace TradingSystem.Functions.Functions
         [Function("AccountSyncService")]
         public async Task Run([TimerTrigger("0 */15 * * * *")] TimerInfo myTimer)
         {
-            var startTime = DateTime.UtcNow;
-            _logger.LogInformation("AccountSyncService started at: {time}", startTime);
-
-            // Track if this is a missed execution
-            if (myTimer.ScheduleStatus != null)
-            {
-                _logger.LogInformation(
-                    "Next timer schedule at: {next}",
-                    myTimer.ScheduleStatus.Next);
-            }
+            _logger.LogInformation("AccountSyncService triggered at: {time}", DateTime.UtcNow);
 
             try
             {
-                // Step 1: Get account info from Alpaca
-                _logger.LogInformation("Fetching account information from Alpaca");
+                // Check if market is open (optional - can sync even when closed for overnight changes)
+                var isMarketOpen = await _tableStorageService.IsMarketOpenAsync();
+                _logger.LogInformation("Market open status: {status}", isMarketOpen);
+
+                // Get current portfolio to check if trading is halted
+                var portfolio = await _portfolioService.GetCurrentPortfolioAsync();
+                if (portfolio == null)
+                {
+                    _logger.LogError("No portfolio found in database. Skipping sync.");
+                    return;
+                }
+
+                // Still sync even if trading is halted (to track recovery)
+                if (portfolio.IsTradingPaused)
+                {
+                    _logger.LogWarning("Trading is currently HALTED. Reason: {reason}. Still syncing for monitoring.",
+                        portfolio.PausedReason);
+                }
+
+                // Fetch account info from Alpaca
+                _logger.LogInformation("Fetching account information from Alpaca...");
                 var accountInfo = await _alpacaService.GetAccountInfoAsync();
 
-                // Step 2: Get current positions from Alpaca
-                _logger.LogInformation("Fetching positions from Alpaca");
+                // Fetch current positions from Alpaca
+                _logger.LogInformation("Fetching positions from Alpaca...");
                 var positions = await _alpacaService.GetPositionsAsync();
 
-                // Step 3: Sync to database
-                _logger.LogInformation("Syncing portfolio state to database");
-                await _portfolioService.SyncPortfolioStateAsync(accountInfo, positions);
-
-                // Step 4: Log success
-                var duration = (DateTime.UtcNow - startTime).TotalSeconds;
                 _logger.LogInformation(
-                    "AccountSyncService completed successfully in {duration:F2}s. " +
-                    "Equity: ${equity:F2}, Cash: ${cash:F2}, Positions: {count}",
-                    duration,
+                    "Alpaca data retrieved: Equity=${equity}, Cash=${cash}, Positions={posCount}",
                     accountInfo.Equity,
                     accountInfo.Cash,
                     positions.Count);
 
-                // Step 5: Send notification if there are significant changes
-                // (This is optional - can be implemented later)
-                await CheckForSignificantChangesAsync(accountInfo, positions);
+                // Sync portfolio state to database
+                await _portfolioService.SyncPortfolioStateAsync(accountInfo, positions);
+
+                // Re-fetch portfolio to get updated values
+                portfolio = await _portfolioService.GetCurrentPortfolioAsync();
+
+                // Check drawdown and handle risk management
+                await CheckDrawdownAndManageRiskAsync(portfolio, accountInfo);
+
+                // Update holding periods for positions
+                await _portfolioService.UpdateHoldingPeriodsAsync();
+
+                _logger.LogInformation(
+                    "Account sync complete. Equity: ${equity}, Drawdown: {drawdown:F2}%, Trading Halted: {halted}",
+                    portfolio.CurrentEquity,
+                    portfolio.CurrentDrawdownPercent,
+                    portfolio.IsTradingPaused);
             }
             catch (Exception ex)
             {
@@ -80,77 +104,91 @@ namespace TradingSystem.Functions.Functions
                 // Send alert email on failure
                 try
                 {
-                    await _emailService.SendSystemAlertAsync(
+                    await _emailService.SendAlertAsync(
                         "Account Sync Failed",
-                        $"AccountSyncService failed at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\n\n" +
-                        $"Error: {ex.Message}\n\n" +
-                        $"Stack Trace:\n{ex.StackTrace}");
+                        $"The AccountSyncService encountered an error:\n\n{ex.Message}\n\nPlease check the logs for details.",
+                        "HIGH");
                 }
                 catch (Exception emailEx)
                 {
-                    _logger.LogError(emailEx, "Failed to send error notification email");
+                    _logger.LogError(emailEx, "Failed to send error alert email");
                 }
 
-                // Re-throw to mark function execution as failed in Application Insights
-                throw;
+                throw; // Re-throw to mark function as failed
             }
         }
 
         /// <summary>
-        /// Checks for significant changes and sends notifications
-        /// Optional feature for alerting on major portfolio changes
+        /// Checks current drawdown and manages risk accordingly
         /// </summary>
-        private async Task CheckForSignificantChangesAsync(
-            Models.AccountInfo accountInfo,
-            List<Models.PositionInfo> positions)
+        private async Task CheckDrawdownAndManageRiskAsync(Portfolio portfolio, AccountInfo accountInfo)
         {
-            try
+            var drawdown = portfolio.CurrentDrawdownPercent;
+
+            _logger.LogInformation("Checking drawdown: {drawdown:F2}% (Warning: {warn}%, Halt: {halt}%)",
+                drawdown, DRAWDOWN_WARNING_THRESHOLD, DRAWDOWN_HALT_THRESHOLD);
+
+            // Check for 20% drawdown - HALT TRADING
+            if (drawdown <= DRAWDOWN_HALT_THRESHOLD && !portfolio.IsTradingPaused)
             {
-                // Get previous sync data to compare
-                var portfolio = await _portfolioService.GetCurrentPortfolioAsync();
+                _logger.LogCritical(
+                    "CRITICAL: Drawdown of {drawdown:F2}% exceeds {threshold}% threshold. HALTING TRADING.",
+                    drawdown, DRAWDOWN_HALT_THRESHOLD);
 
-                // Check if there are new positions
-                var existingPositions = await GetExistingPositionSymbolsAsync();
-                var newPositions = positions
-                    .Where(p => !existingPositions.Contains(p.Symbol))
-                    .ToList();
+                // Halt trading
+                await _portfolioService.HaltTradingAsync(
+                    $"Drawdown of {drawdown:F2}% exceeded {DRAWDOWN_HALT_THRESHOLD}% threshold");
 
-                if (newPositions.Any())
+                // Send critical alert
+                await _emailService.SendAlertAsync(
+                    "🚨 CRITICAL: Trading Halted - Drawdown Exceeded",
+                    $"Trading has been automatically HALTED due to excessive drawdown.\n\n" +
+                    $"Current Drawdown: {drawdown:F2}%\n" +
+                    $"Threshold: {DRAWDOWN_HALT_THRESHOLD}%\n" +
+                    $"Current Equity: ${accountInfo.Equity:N2}\n" +
+                    $"Peak Value: ${portfolio.PeakValue:N2}\n" +
+                    $"Loss from Peak: ${portfolio.PeakValue - accountInfo.Equity:N2}\n\n" +
+                    $"MANUAL INTERVENTION REQUIRED to resume trading.\n" +
+                    $"Please review positions and market conditions before resuming.",
+                    "CRITICAL");
+
+                return;
+            }
+
+            // Check for 15% drawdown - EARLY WARNING
+            if (drawdown <= DRAWDOWN_WARNING_THRESHOLD && drawdown > DRAWDOWN_HALT_THRESHOLD)
+            {
+                _logger.LogWarning(
+                    "WARNING: Drawdown of {drawdown:F2}% is approaching {threshold}% halt threshold.",
+                    drawdown, DRAWDOWN_HALT_THRESHOLD);
+
+                // Send warning alert (only once per day to avoid spam)
+                var lastWarningKey = $"DrawdownWarning_{DateTime.UtcNow:yyyy-MM-dd}";
+                var alreadyWarned = await _tableStorageService.GetCacheValueAsync<bool>(lastWarningKey);
+
+                if (!alreadyWarned)
                 {
-                    _logger.LogInformation(
-                        "New positions detected: {symbols}",
-                        string.Join(", ", newPositions.Select(p => p.Symbol)));
-                }
+                    await _emailService.SendAlertAsync(
+                        "⚠️ WARNING: Drawdown Approaching Limit",
+                        $"Portfolio drawdown is approaching the halt threshold.\n\n" +
+                        $"Current Drawdown: {drawdown:F2}%\n" +
+                        $"Warning Threshold: {DRAWDOWN_WARNING_THRESHOLD}%\n" +
+                        $"Halt Threshold: {DRAWDOWN_HALT_THRESHOLD}%\n" +
+                        $"Current Equity: ${accountInfo.Equity:N2}\n" +
+                        $"Peak Value: ${portfolio.PeakValue:N2}\n\n" +
+                        $"Trading will be automatically halted if drawdown reaches {DRAWDOWN_HALT_THRESHOLD}%.",
+                        "HIGH");
 
-                // Check for large daily change (> 5%)
-                if (portfolio.LastSyncTimestamp.HasValue)
-                {
-                    var timeSinceLastSync = DateTime.UtcNow - portfolio.LastSyncTimestamp.Value;
-
-                    // Only check if last sync was recent (within 30 minutes)
-                    if (timeSinceLastSync.TotalMinutes <= 30)
-                    {
-                        // Get previous equity from database (would need to query PerformanceMetrics table)
-                        // For now, just log if we notice major changes
-                        _logger.LogDebug("Portfolio monitoring: Current equity ${equity}", accountInfo.Equity);
-                    }
+                    // Mark that we've sent warning today
+                    await _tableStorageService.SetCacheValueAsync(lastWarningKey, true, TimeSpan.FromHours(24));
                 }
             }
-            catch (Exception ex)
-            {
-                // Don't fail the whole function if this check fails
-                _logger.LogWarning(ex, "Error checking for significant changes");
-            }
-        }
 
-        /// <summary>
-        /// Helper method to get existing position symbols
-        /// </summary>
-        private async Task<List<string>> GetExistingPositionSymbolsAsync()
-        {
-            // This would query the database - simplified for now
-            // In real implementation, would use _portfolioService or _dbContext
-            return new List<string>();
+            // If we were previously warned but recovered, log it
+            if (drawdown > DRAWDOWN_WARNING_THRESHOLD && portfolio.CurrentDrawdownPercent <= DRAWDOWN_WARNING_THRESHOLD)
+            {
+                _logger.LogInformation("Portfolio has recovered above warning threshold. Current drawdown: {drawdown:F2}%", drawdown);
+            }
         }
     }
 }
