@@ -9,7 +9,7 @@ using TradingSystem.Functions.Services;
 using TradingSystem.Functions.Services.Interfaces;
 
 var host = new HostBuilder()
-    .ConfigureFunctionsWebApplication() // Changed from ConfigureFunctionsWorkerDefaults
+    .ConfigureFunctionsWebApplication()
     .ConfigureServices((context, services) =>
     {
         // Application Insights
@@ -49,11 +49,16 @@ var host = new HostBuilder()
             LatestQuotesTableName = "LatestQuotes"
         });
 
-        // Services
+        // Phase 2 Services
         services.AddScoped<IMarketDataService, MarketDataService>();
         services.AddScoped<ITechnicalIndicatorsService, TechnicalIndicatorsService>();
         services.AddScoped<ITableStorageService, TableStorageService>();
         services.AddScoped<IEmailService, EmailService>();
+
+        // Phase 3 Services - Portfolio Management
+        services.AddScoped<IAlpacaAccountService, AlpacaAccountService>();
+        services.AddScoped<IPortfolioService, PortfolioService>();
+        services.AddScoped<IPerformanceService, PerformanceService>();
     })
     .Build();
 
