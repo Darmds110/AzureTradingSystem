@@ -1,161 +1,160 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using MailKit.Net.Smtp;
+﻿using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using MimeKit;
 using TradingSystem.Functions.Config;
-using TradingSystem.Functions.Data;
-using TradingSystem.Functions.Models;
 using TradingSystem.Functions.Services.Interfaces;
 
-namespace TradingSystem.Functions.Services;
-
-public class EmailService : IEmailService
+namespace TradingSystem.Functions.Services
 {
-    private readonly EmailConfig _config;
-    private readonly TradingDbContext _dbContext;
-    private readonly ILogger<EmailService> _logger;
-
-    public EmailService(
-        EmailConfig config,
-        TradingDbContext dbContext,
-        ILogger<EmailService> logger)
+    /// <summary>
+    /// Email service implementation using MailKit
+    /// </summary>
+    public class EmailService : IEmailService
     {
-        _config = config;
-        _dbContext = dbContext;
-        _logger = logger;
-    }
+        private readonly EmailConfig _config;
+        private readonly ILogger<EmailService> _logger;
 
-    public async Task SendNotificationAsync(string subject, string body, string priority = "MEDIUM")
-    {
-        try
+        public EmailService(EmailConfig config, ILogger<EmailService> logger)
         {
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress("Trading System", _config.FromAddress));
-            message.To.Add(new MailboxAddress("", _config.ToAddress));
-            message.Subject = subject;
-            message.Body = new TextPart("plain") { Text = body };
-
-            using var client = new SmtpClient();
-            await client.ConnectAsync(_config.SmtpServer, _config.SmtpPort, SecureSocketOptions.StartTls);
-            await client.AuthenticateAsync(_config.SmtpUsername, _config.SmtpPassword);
-            await client.SendAsync(message);
-            await client.DisconnectAsync(true);
-
-            // Log notification
-            await LogNotification(subject, body, priority, "EMAIL", true, null);
-
-            _logger.LogInformation("Email sent: {Subject}", subject);
+            _config = config;
+            _logger = logger;
         }
-        catch (Exception ex)
+
+        /// <summary>
+        /// Sends a generic email
+        /// </summary>
+        public async Task SendEmailAsync(string subject, string body)
         {
-            _logger.LogError(ex, "Error sending email: {Subject}", subject);
-            await LogNotification(subject, body, priority, "EMAIL", false, ex.Message);
-            throw;
+            await SendEmailInternalAsync(subject, body);
         }
-    }
 
-    public async Task SendTradeNotificationAsync(string symbol, string action, int quantity, decimal price)
-    {
-        var subject = $"Trade Executed: {action} {quantity} {symbol}";
-        var body = $@"
-Trade Notification
-==================
-
-Symbol: {symbol}
-Action: {action}
-Quantity: {quantity}
-Price: ${price:F2}
-Total Value: ${quantity * price:F2}
-Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}
-
-This is an automated notification from your trading system.
-";
-
-        await SendNotificationAsync(subject, body, "HIGH");
-    }
-
-    public async Task SendErrorNotificationAsync(string errorMessage, Exception? exception = null)
-    {
-        var subject = "Trading System Error Alert";
-        var body = $@"
-Error Alert
-===========
-
-Error: {errorMessage}
-
-{(exception != null ? $@"
-Exception Details:
-{exception.GetType().Name}: {exception.Message}
-
-Stack Trace:
-{exception.StackTrace}
-" : "")}
-
-Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}
-
-Please check Application Insights for more details.
-";
-
-        await SendNotificationAsync(subject, body, "CRITICAL");
-    }
-
-    public async Task SendDailySummaryAsync(decimal portfolioValue, decimal dayChange, int tradesExecuted)
-    {
-        var subject = $"Daily Summary - Portfolio: ${portfolioValue:F2}";
-        var changePercent = dayChange / portfolioValue * 100;
-        var changeSymbol = dayChange >= 0 ? "+" : "";
-
-        var body = $@"
-Daily Portfolio Summary
-=======================
-
-Portfolio Value: ${portfolioValue:F2}
-Day's Change: {changeSymbol}${dayChange:F2} ({changeSymbol}{changePercent:F2}%)
-Trades Executed: {tradesExecuted}
-Date: {DateTime.Now:yyyy-MM-dd}
-
-Keep up the great work!
-
----
-This is an automated summary from your trading system.
-";
-
-        await SendNotificationAsync(subject, body, "MEDIUM");
-    }
-
-    private async Task LogNotification(
-        string subject,
-        string body,
-        string priority,
-        string type,
-        bool wasSuccessful,
-        string? errorMessage)
-    {
-        try
+        /// <summary>
+        /// Sends an alert email with priority level
+        /// </summary>
+        public async Task SendAlertAsync(string subject, string body, string priority)
         {
-            var notification = new NotificationHistory
+            var priorityPrefix = priority.ToUpper() switch
             {
-                SentAt = DateTime.UtcNow,
-                NotificationType = type,
-                Priority = priority,
-                Subject = subject,
-                Body = body,
-                Recipient = _config.ToAddress,
-                WasSuccessful = wasSuccessful,
-                ErrorMessage = errorMessage
+                "CRITICAL" => "🚨 CRITICAL: ",
+                "HIGH" => "⚠️ ",
+                "MEDIUM" => "ℹ️ ",
+                _ => ""
             };
 
-            _dbContext.NotificationHistory.Add(notification);
-            await _dbContext.SaveChangesAsync();
+            var fullSubject = $"{priorityPrefix}{subject}";
+            var fullBody = $"Priority: {priority}\nTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\n\n{body}";
+
+            await SendEmailInternalAsync(fullSubject, fullBody);
         }
-        catch (Exception ex)
+
+        /// <summary>
+        /// Sends a summary email
+        /// </summary>
+        public async Task SendSummaryEmailAsync(string subject, string body)
         {
-            _logger.LogError(ex, "Error logging notification to database");
+            await SendEmailInternalAsync(subject, body);
+        }
+
+        /// <summary>
+        /// Sends a weekly performance summary
+        /// </summary>
+        public async Task SendWeeklySummaryAsync(
+            decimal portfolioValue,
+            decimal weeklyReturn,
+            decimal totalReturn,
+            int tradesExecuted,
+            decimal winRate)
+        {
+            var subject = $"📊 Weekly Trading Summary - {DateTime.UtcNow:MMM dd, yyyy}";
+
+            var body = $@"
+Weekly Performance Summary
+==========================
+
+Portfolio Value: ${portfolioValue:N2}
+Weekly Return: {weeklyReturn:F2}%
+Total Return: {totalReturn:F2}%
+
+Trading Activity:
+- Trades Executed: {tradesExecuted}
+- Win Rate: {winRate:F1}%
+
+Generated at: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC
+";
+
+            await SendEmailInternalAsync(subject, body);
+        }
+
+        /// <summary>
+        /// Sends a monthly performance summary
+        /// </summary>
+        public async Task SendMonthlySummaryAsync(
+            decimal portfolioValue,
+            decimal monthlyReturn,
+            decimal totalReturn,
+            decimal sharpeRatio,
+            decimal maxDrawdown,
+            int tradesExecuted,
+            decimal azureCosts)
+        {
+            var subject = $"📈 Monthly Trading Report - {DateTime.UtcNow:MMMM yyyy}";
+
+            var body = $@"
+Monthly Performance Report
+==========================
+
+Portfolio Summary:
+- Current Value: ${portfolioValue:N2}
+- Monthly Return: {monthlyReturn:F2}%
+- Total Return (All-Time): {totalReturn:F2}%
+
+Risk Metrics:
+- Sharpe Ratio: {sharpeRatio:F2}
+- Maximum Drawdown: {maxDrawdown:F2}%
+
+Trading Activity:
+- Total Trades: {tradesExecuted}
+
+Cost Analysis:
+- Azure Costs: ${azureCosts:N2}
+- Net Return: ${portfolioValue - 1000 - azureCosts:N2}
+
+Generated at: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC
+";
+
+            await SendEmailInternalAsync(subject, body);
+        }
+
+        /// <summary>
+        /// Internal method to send emails
+        /// </summary>
+        private async Task SendEmailInternalAsync(string subject, string body)
+        {
+            try
+            {
+                _logger.LogInformation("Sending email: {subject}", subject);
+
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress("Trading System", _config.FromAddress));
+                message.To.Add(new MailboxAddress("", _config.ToAddress));
+                message.Subject = subject;
+                message.Body = new TextPart("plain") { Text = body };
+
+                using var client = new SmtpClient();
+
+                await client.ConnectAsync(_config.SmtpServer, _config.SmtpPort, SecureSocketOptions.StartTls);
+                await client.AuthenticateAsync(_config.SmtpUsername, _config.SmtpPassword);
+                await client.SendAsync(message);
+                await client.DisconnectAsync(true);
+
+                _logger.LogInformation("Email sent successfully: {subject}", subject);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send email: {subject}", subject);
+                throw;
+            }
         }
     }
 }

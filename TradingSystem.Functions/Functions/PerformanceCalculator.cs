@@ -32,7 +32,7 @@ namespace TradingSystem.Functions.Functions
         /// CRON: "0 0 22 * * *" = At 22:00 UTC every day
         /// </summary>
         [Function("PerformanceCalculator")]
-        public async Task Run([TimerTrigger("0 0 22 * * *")] TimerInfo myTimer)
+        public async Task Run([TimerTrigger("0 0 22 * * *")] TimerInfo timerInfo)
         {
             _logger.LogInformation("PerformanceCalculator triggered at: {time}", DateTime.UtcNow);
 
@@ -67,6 +67,14 @@ namespace TradingSystem.Functions.Functions
                         "Weekly metrics calculated: Return={weeklyReturn:F2}%, Win Rate={winRate:F1}%",
                         weeklyMetrics.PeriodReturnPercent,
                         weeklyMetrics.WinRatePercent);
+
+                    // Send weekly summary email
+                    await _emailService.SendWeeklySummaryAsync(
+                        weeklyMetrics.PortfolioValue,
+                        weeklyMetrics.PeriodReturnPercent ?? 0,
+                        weeklyMetrics.TotalReturnPercent,
+                        weeklyMetrics.TotalTrades,
+                        weeklyMetrics.WinRatePercent ?? 0);
                 }
 
                 // Calculate monthly metrics (on last day of month)
@@ -79,6 +87,16 @@ namespace TradingSystem.Functions.Functions
                         "Monthly metrics calculated: Return={monthlyReturn:F2}%, Sharpe={sharpe:F2}",
                         monthlyMetrics.PeriodReturnPercent,
                         monthlyMetrics.SharpeRatio);
+
+                    // Send monthly summary email (Azure costs would need to be fetched separately)
+                    await _emailService.SendMonthlySummaryAsync(
+                        monthlyMetrics.PortfolioValue,
+                        monthlyMetrics.PeriodReturnPercent ?? 0,
+                        monthlyMetrics.TotalReturnPercent,
+                        monthlyMetrics.SharpeRatio ?? 0,
+                        monthlyMetrics.DrawdownPercent,
+                        monthlyMetrics.TotalTrades,
+                        0); // Azure costs placeholder
                 }
 
                 // Compare against benchmarks

@@ -10,17 +10,17 @@ namespace TradingSystem.Functions.Services.Interfaces
         /// <summary>
         /// Calculates daily performance metrics
         /// </summary>
-        Task<DailyMetrics> CalculateDailyMetricsAsync(int portfolioId);
+        Task<PerformanceMetrics> CalculateDailyMetricsAsync(int portfolioId);
 
         /// <summary>
         /// Calculates weekly performance metrics
         /// </summary>
-        Task<PeriodMetrics> CalculateWeeklyMetricsAsync(int portfolioId);
+        Task<PerformanceMetrics> CalculateWeeklyMetricsAsync(int portfolioId);
 
         /// <summary>
         /// Calculates monthly performance metrics
         /// </summary>
-        Task<PeriodMetrics> CalculateMonthlyMetricsAsync(int portfolioId);
+        Task<PerformanceMetrics> CalculateMonthlyMetricsAsync(int portfolioId);
 
         /// <summary>
         /// Compares portfolio performance to benchmarks (SPY, QQQ)
@@ -31,29 +31,31 @@ namespace TradingSystem.Functions.Services.Interfaces
         /// Calculates performance metrics per strategy
         /// </summary>
         Task CalculateStrategyPerformanceAsync(int portfolioId);
-    }
 
-    /// <summary>
-    /// Daily performance metrics
-    /// </summary>
-    public class DailyMetrics
-    {
-        public decimal DailyReturnPercent { get; set; }
-        public decimal TotalReturnPercent { get; set; }
-        public decimal PortfolioValue { get; set; }
-        public DateTime Date { get; set; }
-    }
+        /// <summary>
+        /// Calculates Sharpe ratio for a period
+        /// </summary>
+        Task<decimal> CalculateSharpeRatioAsync(int portfolioId, DateTime startDate, DateTime endDate);
 
-    /// <summary>
-    /// Period performance metrics (weekly/monthly)
-    /// </summary>
-    public class PeriodMetrics
-    {
-        public decimal PeriodReturnPercent { get; set; }
-        public decimal WinRatePercent { get; set; }
-        public decimal SharpeRatio { get; set; }
-        public decimal MaxDrawdownPercent { get; set; }
-        public int TotalTrades { get; set; }
+        /// <summary>
+        /// Calculates maximum drawdown for a period
+        /// </summary>
+        Task<decimal> CalculateMaxDrawdownAsync(int portfolioId, DateTime startDate, DateTime endDate);
+
+        /// <summary>
+        /// Gets trade statistics for a period
+        /// </summary>
+        Task<TradeStatistics> GetTradeStatisticsAsync(int portfolioId, DateTime startDate, DateTime endDate);
+
+        /// <summary>
+        /// Gets the latest performance metrics
+        /// </summary>
+        Task<PerformanceMetrics?> GetLatestMetricsAsync(int portfolioId);
+
+        /// <summary>
+        /// Gets historical metrics for charting
+        /// </summary>
+        Task<List<PerformanceMetrics>> GetHistoricalMetricsAsync(int portfolioId, string periodType, int count);
     }
 
     /// <summary>
