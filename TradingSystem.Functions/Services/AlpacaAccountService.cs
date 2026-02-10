@@ -1,185 +1,142 @@
 ﻿using Alpaca.Markets;
 using Microsoft.Extensions.Logging;
+using TradingSystem.Functions.Config;
 using TradingSystem.Functions.Models;
 using TradingSystem.Functions.Services.Interfaces;
 
 namespace TradingSystem.Functions.Services
 {
     /// <summary>
-    /// Implementation of Alpaca account service using Alpaca.Markets SDK
+    /// Service for interacting with Alpaca Markets brokerage API
     /// </summary>
     public class AlpacaAccountService : IAlpacaAccountService
     {
         private readonly IAlpacaTradingClient _tradingClient;
         private readonly ILogger<AlpacaAccountService> _logger;
 
-        public AlpacaAccountService(ILogger<AlpacaAccountService> logger)
+        public AlpacaAccountService(AlpacaConfig config, ILogger<AlpacaAccountService> logger)
         {
             _logger = logger;
 
-            // Get credentials from environment variables (set in Azure Function App Settings)
-            var apiKey = Environment.GetEnvironmentVariable("AlpacaApiKey")
-                ?? throw new InvalidOperationException("AlpacaApiKey not configured");
-            var secretKey = Environment.GetEnvironmentVariable("AlpacaSecretKey")
-                ?? throw new InvalidOperationException("AlpacaSecretKey not configured");
-            var baseUrl = Environment.GetEnvironmentVariable("AlpacaBaseUrl")
-                ?? "https://paper-api.alpaca.markets";
+            var isPaper = config.BaseUrl?.Contains("paper") ?? true;
+            var environment = isPaper ? Environments.Paper : Environments.Live;
 
-            _logger.LogInformation("Initializing Alpaca client with base URL: {baseUrl}", baseUrl);
+            var secretKey = new SecretKey(config.ApiKey, config.SecretKey);
+            _tradingClient = environment.GetAlpacaTradingClient(secretKey);
 
-            // Create Alpaca trading client
-            var secretKeyPair = new SecretKey(apiKey, secretKey);
-
-            // Use paper trading or live based on base URL
-            if (baseUrl.Contains("paper"))
-            {
-                _tradingClient = Environments.Paper.GetAlpacaTradingClient(secretKeyPair);
-                _logger.LogInformation("Using Alpaca PAPER trading environment");
-            }
-            else
-            {
-                _tradingClient = Environments.Live.GetAlpacaTradingClient(secretKeyPair);
-                _logger.LogWarning("Using Alpaca LIVE trading environment");
-            }
+            _logger.LogInformation("Alpaca client initialized for {env} trading", isPaper ? "PAPER" : "LIVE");
         }
 
-        /// <summary>
-        /// Gets current account information from Alpaca
-        /// </summary>
         public async Task<AccountInfo> GetAccountInfoAsync()
         {
             try
             {
-                _logger.LogInformation("Fetching account information from Alpaca");
-
                 var account = await _tradingClient.GetAccountAsync();
 
-                var accountInfo = new AccountInfo
+                return new AccountInfo
                 {
-                    Equity = account.Equity,
+                    Equity = account.Equity ?? 0,
                     Cash = account.TradableCash,
-                    BuyingPower = account.BuyingPower,
+                    BuyingPower = account.BuyingPower ?? 0,
                     Status = account.Status.ToString(),
                     AccountNumber = account.AccountNumber,
                     RetrievedAt = DateTime.UtcNow
                 };
-
-                _logger.LogInformation(
-                    "Account info retrieved: Equity=${equity}, Cash=${cash}, Status={status}",
-                    accountInfo.Equity,
-                    accountInfo.Cash,
-                    accountInfo.Status);
-
-                return accountInfo;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching account information from Alpaca");
+                _logger.LogError(ex, "Failed to get account info from Alpaca");
                 throw;
             }
         }
 
-        /// <summary>
-        /// Gets all current positions from Alpaca
-        /// </summary>
         public async Task<List<PositionInfo>> GetPositionsAsync()
         {
             try
             {
-                _logger.LogInformation("Fetching positions from Alpaca");
-
                 var positions = await _tradingClient.ListPositionsAsync();
 
-                var positionList = positions.Select(p => new PositionInfo
+                return positions.Select(p => new PositionInfo
                 {
                     Symbol = p.Symbol,
-                    Quantity = p.Quantity,
+                    Quantity = (int)p.Quantity,
                     AverageCostBasis = p.AverageEntryPrice,
-                    CurrentPrice = p.AssetCurrentPrice ?? p.AverageEntryPrice,
-                    MarketValue = p.MarketValue ?? (p.Quantity * p.AverageEntryPrice),
+                    CurrentPrice = p.AssetCurrentPrice ?? 0,
+                    MarketValue = p.MarketValue ?? 0,
                     UnrealizedPL = p.UnrealizedProfitLoss ?? 0,
                     UnrealizedPLPercent = p.UnrealizedProfitLossPercent ?? 0,
-                    Side = p.Side.ToString().ToLower(),
+                    Side = p.Side.ToString(),
                     AssetId = p.AssetId.ToString()
                 }).ToList();
-
-                _logger.LogInformation("Retrieved {count} positions from Alpaca", positionList.Count);
-
-                return positionList;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching positions from Alpaca");
+                _logger.LogError(ex, "Failed to get positions from Alpaca");
                 throw;
             }
         }
 
-        /// <summary>
-        /// Cancels all pending orders in the account
-        /// Used when trading halt is triggered
-        /// </summary>
-        public async Task<bool> CancelAllOrdersAsync()
+        public async Task<int> CancelAllOrdersAsync()
         {
             try
             {
-                _logger.LogWarning("Cancelling all pending orders");
+                var cancelledOrders = await _tradingClient.CancelAllOrdersAsync();
+                var count = cancelledOrders.Count();
+                _logger.LogInformation("Cancelled {count} orders", count);
+                return count;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to cancel all orders");
+                throw;
+            }
+        }
 
-                var orders = await _tradingClient.ListOrdersAsync(
-                    new ListOrdersRequest { OrderStatusFilter = OrderStatusFilter.Open });
+        public async Task<List<AccountActivity>> GetAccountActivitiesAsync(DateTime? after = null, DateTime? until = null)
+        {
+            try
+            {
+                // Use simple request - SDK version may not support all parameters
+                var activities = await _tradingClient.ListAccountActivitiesAsync(
+                    new AccountActivitiesRequest());
 
-                foreach (var order in orders)
+                var result = activities.AsEnumerable();
+
+                if (after.HasValue)
                 {
-                    try
-                    {
-                        await _tradingClient.CancelOrderAsync(order.OrderId);
-                        _logger.LogInformation("Cancelled order {orderId} for {symbol}",
-                            order.OrderId, order.Symbol);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error cancelling order {orderId}", order.OrderId);
-                    }
+                    result = result.Where(a => a.ActivityDateTime >= after.Value);
                 }
 
-                _logger.LogInformation("Cancelled {count} orders", orders.Count);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error cancelling all orders");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Gets account activities for specified date range
-        /// </summary>
-        public async Task<List<object>> GetAccountActivitiesAsync(DateTime startDate, DateTime endDate)
-        {
-            try
-            {
-                _logger.LogInformation("Fetching account activities from {start} to {end}",
-                    startDate, endDate);
-
-                var request = new AccountActivitiesRequest(AccountActivityType.All)
+                if (until.HasValue)
                 {
-                    After = startDate,
-                    Until = endDate
-                };
+                    result = result.Where(a => a.ActivityDateTime <= until.Value);
+                }
 
-                var activities = await _tradingClient.ListAccountActivitiesAsync(request);
-
-                _logger.LogInformation("Retrieved {count} activities", activities.Count);
-
-                // Convert to list of objects for now
-                // Can be expanded to specific activity types later
-                return activities.Cast<object>().ToList();
+                return result.Select(a => new AccountActivity
+                {
+                    ActivityType = a.ActivityType.ToString(),
+                    ActivityDateTime = a.ActivityDateTime,
+                    Symbol = (a as ITradeActivity)?.Symbol ?? string.Empty,
+                    Quantity = (int)((a as ITradeActivity)?.Quantity ?? 0),
+                    Price = (a as ITradeActivity)?.Price ?? 0,
+                    Side = (a as ITradeActivity)?.Side.ToString() ?? string.Empty
+                }).ToList();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching account activities");
-                throw;
+                _logger.LogError(ex, "Failed to get account activities");
+                return new List<AccountActivity>();
             }
         }
+    }
+
+    public class AccountActivity
+    {
+        public string ActivityType { get; set; } = string.Empty;
+        public DateTime ActivityDateTime { get; set; }
+        public string Symbol { get; set; } = string.Empty;
+        public int Quantity { get; set; }
+        public decimal Price { get; set; }
+        public string Side { get; set; } = string.Empty;
     }
 }

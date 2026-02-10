@@ -21,11 +21,7 @@ public class MarketDataService : IMarketDataService
         _logger = logger;
 
         var secretKey = new SecretKey(config.ApiKey, config.SecretKey);
-
-        // Trading client for clock/calendar
         _alpacaTradingClient = Environments.Paper.GetAlpacaTradingClient(secretKey);
-
-        // Data client for quotes and historical data
         _alpacaDataClient = Environments.Paper.GetAlpacaDataClient(secretKey);
     }
 
@@ -39,7 +35,6 @@ public class MarketDataService : IMarketDataService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error checking if market is open");
-
             var today = DateTime.UtcNow.Date;
             var schedule = await _tableStorage.GetMarketScheduleAsync(today);
             return schedule.isOpen;
@@ -81,7 +76,6 @@ public class MarketDataService : IMarketDataService
             var clock = await _alpacaTradingClient.GetClockAsync();
             var today = DateTime.UtcNow.Date;
 
-            // Use Async version
             await _tableStorage.SaveMarketScheduleAsync(
                 today,
                 clock.IsOpen,
@@ -95,8 +89,6 @@ public class MarketDataService : IMarketDataService
                 clock.NextOpenUtc,
                 clock.NextCloseUtc
             );
-
-            _logger.LogInformation("Market schedule update completed");
         }
         catch (Exception ex)
         {
@@ -109,10 +101,7 @@ public class MarketDataService : IMarketDataService
     {
         try
         {
-            // Use the new LatestMarketDataRequest for stocks
             var latestRequest = new LatestMarketDataRequest(symbol);
-
-            // Get latest trade - this works with free tier
             var latestTrade = await _alpacaDataClient.GetLatestTradeAsync(latestRequest);
 
             if (latestTrade == null)
@@ -121,36 +110,19 @@ public class MarketDataService : IMarketDataService
                 return null;
             }
 
-            // Get latest quote for bid/ask spread info
-            try
-            {
-                var latestQuote = await _alpacaDataClient.GetLatestQuoteAsync(latestRequest);
+            // Handle nullable TimestampUtc
+            var timestamp = latestTrade.TimestampUtc ?? DateTime.UtcNow;
 
-                return new StockQuote
-                {
-                    Symbol = symbol,
-                    Price = latestTrade.Price,
-                    Open = latestTrade.Price, // Use trade price as fallback
-                    High = latestTrade.Price,
-                    Low = latestTrade.Price,
-                    Volume = 0, // Volume not available in latest trade
-                    Timestamp = latestTrade.TimestampUtc ?? DateTime.UtcNow
-                };
-            }
-            catch (Exception)
+            return new StockQuote
             {
-                // If quote fails, just use trade data
-                return new StockQuote
-                {
-                    Symbol = symbol,
-                    Price = latestTrade.Price,
-                    Open = latestTrade.Price,
-                    High = latestTrade.Price,
-                    Low = latestTrade.Price,
-                    Volume = 0,
-                    Timestamp = latestTrade.TimestampUtc ?? DateTime.UtcNow
-                };
-            }
+                Symbol = symbol,
+                Price = latestTrade.Price,
+                Open = latestTrade.Price,
+                High = latestTrade.Price,
+                Low = latestTrade.Price,
+                Volume = 0,
+                Timestamp = timestamp
+            };
         }
         catch (Exception ex)
         {
@@ -163,8 +135,6 @@ public class MarketDataService : IMarketDataService
     {
         try
         {
-            // Make sure we're not requesting same-day data
-            // Free tier only allows historical data from previous days
             var adjustedEndDate = endDate.Date < DateTime.UtcNow.Date
                 ? endDate
                 : DateTime.UtcNow.Date.AddDays(-1);

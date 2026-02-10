@@ -6,14 +6,11 @@ using TradingSystem.Functions.Services.Interfaces;
 
 namespace TradingSystem.Functions.Services
 {
-    /// <summary>
-    /// Service for calculating and storing performance metrics
-    /// </summary>
     public class PerformanceService : IPerformanceService
     {
         private readonly TradingDbContext _dbContext;
         private readonly ILogger<PerformanceService> _logger;
-        private const decimal RiskFreeRate = 0.05m; // 5% annual risk-free rate
+        private const decimal RiskFreeRate = 0.05m;
 
         public PerformanceService(TradingDbContext dbContext, ILogger<PerformanceService> logger)
         {
@@ -21,20 +18,13 @@ namespace TradingSystem.Functions.Services
             _logger = logger;
         }
 
-        /// <summary>
-        /// Calculates daily performance metrics
-        /// </summary>
         public async Task<PerformanceMetrics> CalculateDailyMetricsAsync(int portfolioId)
         {
-            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
-            if (portfolio == null)
-            {
-                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
-            }
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId)
+                ?? throw new InvalidOperationException($"Portfolio {portfolioId} not found");
 
             var today = DateTime.UtcNow.Date;
 
-            // Get yesterday's metrics for daily return calculation
             var yesterdayMetrics = await _dbContext.PerformanceMetrics
                 .Where(m => m.PortfolioId == portfolioId && m.PeriodType == "DAILY" && m.MetricDate < today)
                 .OrderByDescending(m => m.MetricDate)
@@ -43,31 +33,17 @@ namespace TradingSystem.Functions.Services
             var previousValue = yesterdayMetrics?.PortfolioValue ?? portfolio.InitialCapital;
             var currentValue = portfolio.CurrentEquity;
 
-            // Calculate daily return
-            var dailyReturn = previousValue > 0
-                ? ((currentValue - previousValue) / previousValue) * 100
-                : 0;
+            var dailyReturn = previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0;
+            var totalReturn = portfolio.InitialCapital > 0 ? ((currentValue - portfolio.InitialCapital) / portfolio.InitialCapital) * 100 : 0;
+            var maxDrawdown = portfolio.PeakValue > 0 ? ((portfolio.PeakValue - currentValue) / portfolio.PeakValue) * 100 : 0;
 
-            // Calculate total return from initial capital
-            var totalReturn = portfolio.InitialCapital > 0
-                ? ((currentValue - portfolio.InitialCapital) / portfolio.InitialCapital) * 100
-                : 0;
-
-            // Calculate max drawdown
-            var maxDrawdown = portfolio.PeakValue > 0
-                ? ((portfolio.PeakValue - currentValue) / portfolio.PeakValue) * 100
-                : 0;
-
-            // Get today's trade statistics
             var todayTrades = await _dbContext.TradeHistory
                 .Where(t => t.PortfolioId == portfolioId && t.ExitDate.Date == today)
                 .ToListAsync();
 
             var winningTrades = todayTrades.Count(t => t.RealizedProfitLoss > 0);
             var losingTrades = todayTrades.Count(t => t.RealizedProfitLoss < 0);
-            var winRate = todayTrades.Count > 0
-                ? (decimal)winningTrades / todayTrades.Count * 100
-                : (decimal?)null;
+            decimal? winRate = todayTrades.Count > 0 ? (decimal)winningTrades / todayTrades.Count * 100 : null;
 
             var metrics = new PerformanceMetrics
             {
@@ -85,15 +61,11 @@ namespace TradingSystem.Functions.Services
                 CreatedAt = DateTime.UtcNow
             };
 
-            // Check if we already have today's metrics
             var existingMetrics = await _dbContext.PerformanceMetrics
-                .FirstOrDefaultAsync(m => m.PortfolioId == portfolioId &&
-                                         m.PeriodType == "DAILY" &&
-                                         m.MetricDate == today);
+                .FirstOrDefaultAsync(m => m.PortfolioId == portfolioId && m.PeriodType == "DAILY" && m.MetricDate == today);
 
             if (existingMetrics != null)
             {
-                // Update existing
                 existingMetrics.PortfolioValue = metrics.PortfolioValue;
                 existingMetrics.TotalReturnPercent = metrics.TotalReturnPercent;
                 existingMetrics.PeriodReturnPercent = metrics.PeriodReturnPercent;
@@ -111,28 +83,20 @@ namespace TradingSystem.Functions.Services
 
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation(
-                "Daily metrics calculated: Value={value}, DailyReturn={daily}%, TotalReturn={total}%",
+            _logger.LogInformation("Daily metrics calculated: Value={value}, DailyReturn={daily}%, TotalReturn={total}%",
                 currentValue, dailyReturn, totalReturn);
 
             return metrics;
         }
 
-        /// <summary>
-        /// Calculates weekly performance metrics
-        /// </summary>
         public async Task<PerformanceMetrics> CalculateWeeklyMetricsAsync(int portfolioId)
         {
-            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
-            if (portfolio == null)
-            {
-                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
-            }
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId)
+                ?? throw new InvalidOperationException($"Portfolio {portfolioId} not found");
 
             var today = DateTime.UtcNow.Date;
             var weekStart = today.AddDays(-(int)today.DayOfWeek);
 
-            // Get last week's ending value
             var lastWeekMetrics = await _dbContext.PerformanceMetrics
                 .Where(m => m.PortfolioId == portfolioId && m.PeriodType == "WEEKLY" && m.MetricDate < weekStart)
                 .OrderByDescending(m => m.MetricDate)
@@ -141,32 +105,18 @@ namespace TradingSystem.Functions.Services
             var previousValue = lastWeekMetrics?.PortfolioValue ?? portfolio.InitialCapital;
             var currentValue = portfolio.CurrentEquity;
 
-            // Calculate weekly return
-            var weeklyReturn = previousValue > 0
-                ? ((currentValue - previousValue) / previousValue) * 100
-                : 0;
+            var weeklyReturn = previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0;
+            var totalReturn = portfolio.InitialCapital > 0 ? ((currentValue - portfolio.InitialCapital) / portfolio.InitialCapital) * 100 : 0;
 
-            var totalReturn = portfolio.InitialCapital > 0
-                ? ((currentValue - portfolio.InitialCapital) / portfolio.InitialCapital) * 100
-                : 0;
-
-            // Get this week's trades
             var weekTrades = await _dbContext.TradeHistory
                 .Where(t => t.PortfolioId == portfolioId && t.ExitDate >= weekStart)
                 .ToListAsync();
 
             var winningTrades = weekTrades.Count(t => t.RealizedProfitLoss > 0);
-            var losingTrades = weekTrades.Count(t => t.RealizedProfitLoss < 0);
-            var winRate = weekTrades.Count > 0
-                ? (decimal)winningTrades / weekTrades.Count * 100
-                : (decimal?)null;
+            decimal? winRate = weekTrades.Count > 0 ? (decimal)winningTrades / weekTrades.Count * 100 : null;
 
-            // Calculate Sharpe ratio using daily returns
             var sharpeRatio = await CalculateSharpeRatioAsync(portfolioId, weekStart, today);
-
-            var maxDrawdown = portfolio.PeakValue > 0
-                ? ((portfolio.PeakValue - currentValue) / portfolio.PeakValue) * 100
-                : 0;
+            var maxDrawdown = portfolio.PeakValue > 0 ? ((portfolio.PeakValue - currentValue) / portfolio.PeakValue) * 100 : 0;
 
             var metrics = new PerformanceMetrics
             {
@@ -180,17 +130,13 @@ namespace TradingSystem.Functions.Services
                 SharpeRatio = sharpeRatio,
                 TotalTrades = weekTrades.Count,
                 WinningTrades = winningTrades,
-                LosingTrades = losingTrades,
+                LosingTrades = weekTrades.Count - winningTrades,
                 WinRate = winRate,
                 CreatedAt = DateTime.UtcNow
             };
 
-            // Check for existing weekly metrics
             var existingMetrics = await _dbContext.PerformanceMetrics
-                .FirstOrDefaultAsync(m => m.PortfolioId == portfolioId &&
-                                         m.PeriodType == "WEEKLY" &&
-                                         m.MetricDate >= weekStart &&
-                                         m.MetricDate <= today);
+                .FirstOrDefaultAsync(m => m.PortfolioId == portfolioId && m.PeriodType == "WEEKLY" && m.MetricDate >= weekStart && m.MetricDate <= today);
 
             if (existingMetrics != null)
             {
@@ -211,29 +157,17 @@ namespace TradingSystem.Functions.Services
             }
 
             await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation(
-                "Weekly metrics calculated: Value={value}, WeeklyReturn={weekly}%, WinRate={winRate}%",
-                currentValue, weeklyReturn, winRate);
-
             return metrics;
         }
 
-        /// <summary>
-        /// Calculates monthly performance metrics
-        /// </summary>
         public async Task<PerformanceMetrics> CalculateMonthlyMetricsAsync(int portfolioId)
         {
-            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
-            if (portfolio == null)
-            {
-                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
-            }
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId)
+                ?? throw new InvalidOperationException($"Portfolio {portfolioId} not found");
 
             var today = DateTime.UtcNow.Date;
             var monthStart = new DateTime(today.Year, today.Month, 1);
 
-            // Get last month's ending value
             var lastMonthMetrics = await _dbContext.PerformanceMetrics
                 .Where(m => m.PortfolioId == portfolioId && m.PeriodType == "MONTHLY" && m.MetricDate < monthStart)
                 .OrderByDescending(m => m.MetricDate)
@@ -242,30 +176,17 @@ namespace TradingSystem.Functions.Services
             var previousValue = lastMonthMetrics?.PortfolioValue ?? portfolio.InitialCapital;
             var currentValue = portfolio.CurrentEquity;
 
-            // Calculate monthly return
-            var monthlyReturn = previousValue > 0
-                ? ((currentValue - previousValue) / previousValue) * 100
-                : 0;
+            var monthlyReturn = previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0;
+            var totalReturn = portfolio.InitialCapital > 0 ? ((currentValue - portfolio.InitialCapital) / portfolio.InitialCapital) * 100 : 0;
 
-            var totalReturn = portfolio.InitialCapital > 0
-                ? ((currentValue - portfolio.InitialCapital) / portfolio.InitialCapital) * 100
-                : 0;
-
-            // Get this month's trades
             var monthTrades = await _dbContext.TradeHistory
                 .Where(t => t.PortfolioId == portfolioId && t.ExitDate >= monthStart)
                 .ToListAsync();
 
             var winningTrades = monthTrades.Count(t => t.RealizedProfitLoss > 0);
-            var losingTrades = monthTrades.Count(t => t.RealizedProfitLoss < 0);
-            var winRate = monthTrades.Count > 0
-                ? (decimal)winningTrades / monthTrades.Count * 100
-                : (decimal?)null;
+            decimal? winRate = monthTrades.Count > 0 ? (decimal)winningTrades / monthTrades.Count * 100 : null;
 
-            // Calculate Sharpe ratio
             var sharpeRatio = await CalculateSharpeRatioAsync(portfolioId, monthStart, today);
-
-            // Calculate max drawdown
             var maxDrawdown = await CalculateMaxDrawdownAsync(portfolioId, monthStart, today);
 
             var metrics = new PerformanceMetrics
@@ -280,17 +201,13 @@ namespace TradingSystem.Functions.Services
                 SharpeRatio = sharpeRatio,
                 TotalTrades = monthTrades.Count,
                 WinningTrades = winningTrades,
-                LosingTrades = losingTrades,
+                LosingTrades = monthTrades.Count - winningTrades,
                 WinRate = winRate,
                 CreatedAt = DateTime.UtcNow
             };
 
-            // Check for existing monthly metrics
             var existingMetrics = await _dbContext.PerformanceMetrics
-                .FirstOrDefaultAsync(m => m.PortfolioId == portfolioId &&
-                                         m.PeriodType == "MONTHLY" &&
-                                         m.MetricDate >= monthStart &&
-                                         m.MetricDate <= today);
+                .FirstOrDefaultAsync(m => m.PortfolioId == portfolioId && m.PeriodType == "MONTHLY" && m.MetricDate >= monthStart && m.MetricDate <= today);
 
             if (existingMetrics != null)
             {
@@ -311,31 +228,17 @@ namespace TradingSystem.Functions.Services
             }
 
             await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation(
-                "Monthly metrics calculated: Value={value}, MonthlyReturn={monthly}%, Sharpe={sharpe}",
-                currentValue, monthlyReturn, sharpeRatio);
-
             return metrics;
         }
 
-        /// <summary>
-        /// Compares portfolio performance to benchmarks (SPY, QQQ)
-        /// </summary>
         public async Task<BenchmarkComparison> CompareToBenchmarksAsync(int portfolioId, DateTime date)
         {
-            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
-            if (portfolio == null)
-            {
-                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
-            }
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId)
+                ?? throw new InvalidOperationException($"Portfolio {portfolioId} not found");
 
-            // Get portfolio return
             var portfolioReturn = portfolio.InitialCapital > 0
-                ? ((portfolio.CurrentEquity - portfolio.InitialCapital) / portfolio.InitialCapital) * 100
-                : 0;
+                ? ((portfolio.CurrentEquity - portfolio.InitialCapital) / portfolio.InitialCapital) * 100 : 0;
 
-            // Get benchmark returns from market data
             var spyReturn = await GetBenchmarkReturnAsync("SPY", date);
             var qqqReturn = await GetBenchmarkReturnAsync("QQQ", date);
 
@@ -349,14 +252,9 @@ namespace TradingSystem.Functions.Services
             };
         }
 
-        /// <summary>
-        /// Calculates performance metrics per strategy
-        /// </summary>
         public async Task CalculateStrategyPerformanceAsync(int portfolioId)
         {
-            var strategies = await _dbContext.StrategyConfigurations
-                .Where(s => s.IsActive)
-                .ToListAsync();
+            var strategies = await _dbContext.StrategyConfigurations.Where(s => s.IsActive).ToListAsync();
 
             foreach (var strategy in strategies)
             {
@@ -364,104 +262,66 @@ namespace TradingSystem.Functions.Services
                     .Where(t => t.PortfolioId == portfolioId && t.StrategyId == strategy.StrategyId)
                     .ToListAsync();
 
-                if (trades.Count == 0)
-                {
-                    continue;
-                }
+                if (trades.Count == 0) continue;
 
                 var winningTrades = trades.Count(t => t.RealizedProfitLoss > 0);
                 var winRate = (decimal)winningTrades / trades.Count * 100;
                 var totalPL = trades.Sum(t => t.RealizedProfitLoss);
                 var avgHoldingPeriod = trades.Average(t => t.HoldingPeriodDays);
 
-                _logger.LogInformation(
-                    "Strategy {name} performance: Trades={trades}, WinRate={winRate}%, P/L={pl}",
+                _logger.LogInformation("Strategy {name} performance: Trades={trades}, WinRate={winRate}%, P/L={pl}",
                     strategy.StrategyName, trades.Count, winRate, totalPL);
             }
         }
 
-        /// <summary>
-        /// Calculates Sharpe ratio for a period
-        /// </summary>
         public async Task<decimal> CalculateSharpeRatioAsync(int portfolioId, DateTime startDate, DateTime endDate)
         {
             var dailyReturns = await _dbContext.PerformanceMetrics
-                .Where(m => m.PortfolioId == portfolioId &&
-                           m.PeriodType == "DAILY" &&
-                           m.MetricDate >= startDate &&
-                           m.MetricDate <= endDate)
+                .Where(m => m.PortfolioId == portfolioId && m.PeriodType == "DAILY" && m.MetricDate >= startDate && m.MetricDate <= endDate)
                 .Select(m => m.PeriodReturnPercent)
                 .ToListAsync();
 
-            if (dailyReturns.Count < 2)
-            {
-                return 0;
-            }
+            if (dailyReturns.Count < 2) return 0;
 
             var avgReturn = dailyReturns.Average();
             var variance = dailyReturns.Sum(r => (r - avgReturn) * (r - avgReturn)) / (dailyReturns.Count - 1);
             var stdDev = (decimal)Math.Sqrt((double)variance);
 
-            if (stdDev == 0)
-            {
-                return 0;
-            }
+            if (stdDev == 0) return 0;
 
-            // Annualize: multiply by sqrt(252) for daily data
             var dailyRiskFree = RiskFreeRate / 252;
             var annualizedSharpe = ((avgReturn - dailyRiskFree) / stdDev) * (decimal)Math.Sqrt(252);
 
             return Math.Round(annualizedSharpe, 2);
         }
 
-        /// <summary>
-        /// Calculates maximum drawdown for a period
-        /// </summary>
         public async Task<decimal> CalculateMaxDrawdownAsync(int portfolioId, DateTime startDate, DateTime endDate)
         {
             var portfolioValues = await _dbContext.PerformanceMetrics
-                .Where(m => m.PortfolioId == portfolioId &&
-                           m.PeriodType == "DAILY" &&
-                           m.MetricDate >= startDate &&
-                           m.MetricDate <= endDate)
+                .Where(m => m.PortfolioId == portfolioId && m.PeriodType == "DAILY" && m.MetricDate >= startDate && m.MetricDate <= endDate)
                 .OrderBy(m => m.MetricDate)
                 .Select(m => m.PortfolioValue)
                 .ToListAsync();
 
-            if (portfolioValues.Count == 0)
-            {
-                return 0;
-            }
+            if (portfolioValues.Count == 0) return 0;
 
             decimal maxDrawdown = 0;
             decimal peak = portfolioValues[0];
 
             foreach (var value in portfolioValues)
             {
-                if (value > peak)
-                {
-                    peak = value;
-                }
-
+                if (value > peak) peak = value;
                 var drawdown = peak > 0 ? ((peak - value) / peak) * 100 : 0;
-                if (drawdown > maxDrawdown)
-                {
-                    maxDrawdown = drawdown;
-                }
+                if (drawdown > maxDrawdown) maxDrawdown = drawdown;
             }
 
             return Math.Round(maxDrawdown, 2);
         }
 
-        /// <summary>
-        /// Gets trade statistics for a period
-        /// </summary>
         public async Task<TradeStatistics> GetTradeStatisticsAsync(int portfolioId, DateTime startDate, DateTime endDate)
         {
             var trades = await _dbContext.TradeHistory
-                .Where(t => t.PortfolioId == portfolioId &&
-                           t.ExitDate >= startDate &&
-                           t.ExitDate <= endDate)
+                .Where(t => t.PortfolioId == portfolioId && t.ExitDate >= startDate && t.ExitDate <= endDate)
                 .ToListAsync();
 
             var winningTrades = trades.Where(t => t.RealizedProfitLoss > 0).ToList();
@@ -487,9 +347,6 @@ namespace TradingSystem.Functions.Services
             };
         }
 
-        /// <summary>
-        /// Gets the latest performance metrics
-        /// </summary>
         public async Task<PerformanceMetrics?> GetLatestMetricsAsync(int portfolioId)
         {
             return await _dbContext.PerformanceMetrics
@@ -498,9 +355,6 @@ namespace TradingSystem.Functions.Services
                 .FirstOrDefaultAsync();
         }
 
-        /// <summary>
-        /// Gets historical metrics for charting
-        /// </summary>
         public async Task<List<PerformanceMetrics>> GetHistoricalMetricsAsync(int portfolioId, string periodType, int count)
         {
             return await _dbContext.PerformanceMetrics
@@ -511,12 +365,8 @@ namespace TradingSystem.Functions.Services
                 .ToListAsync();
         }
 
-        /// <summary>
-        /// Gets benchmark return from market data
-        /// </summary>
         private async Task<decimal> GetBenchmarkReturnAsync(string symbol, DateTime date)
         {
-            // Get the oldest and most recent prices for the benchmark
             var oldestData = await _dbContext.MarketData
                 .Where(m => m.Symbol == symbol)
                 .OrderBy(m => m.DataTimestamp)
@@ -527,10 +377,7 @@ namespace TradingSystem.Functions.Services
                 .OrderByDescending(m => m.DataTimestamp)
                 .FirstOrDefaultAsync();
 
-            if (oldestData == null || latestData == null || oldestData.ClosePrice == 0)
-            {
-                return 0;
-            }
+            if (oldestData == null || latestData == null || oldestData.ClosePrice == 0) return 0;
 
             return ((latestData.ClosePrice - oldestData.ClosePrice) / oldestData.ClosePrice) * 100;
         }
