@@ -79,7 +79,8 @@ namespace TradingSystem.Functions.Services
 
                 if (existingPosition != null)
                 {
-                    existingPosition.Quantity = brokerPosition.Quantity;
+                    // Cast decimal to int for Position.Quantity if needed
+                    existingPosition.Quantity = (int)brokerPosition.Quantity;
                     existingPosition.AverageCostBasis = brokerPosition.AverageCostBasis;
                     existingPosition.CurrentPrice = brokerPosition.CurrentPrice;
                     existingPosition.UnrealizedProfitLoss = brokerPosition.UnrealizedPL;
@@ -92,7 +93,7 @@ namespace TradingSystem.Functions.Services
                     {
                         PortfolioId = portfolioId,
                         Symbol = brokerPosition.Symbol,
-                        Quantity = brokerPosition.Quantity,
+                        Quantity = (int)brokerPosition.Quantity,  // Cast to int
                         AverageCostBasis = brokerPosition.AverageCostBasis,
                         CurrentPrice = brokerPosition.CurrentPrice,
                         UnrealizedProfitLoss = brokerPosition.UnrealizedPL,

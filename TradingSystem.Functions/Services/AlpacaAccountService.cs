@@ -59,7 +59,7 @@ namespace TradingSystem.Functions.Services
                 return positions.Select(p => new PositionInfo
                 {
                     Symbol = p.Symbol,
-                    Quantity = (int)p.Quantity,
+                    Quantity = p.Quantity,  // Keep as decimal
                     AverageCostBasis = p.AverageEntryPrice,
                     CurrentPrice = p.AssetCurrentPrice ?? 0,
                     MarketValue = p.MarketValue ?? 0,
@@ -76,67 +76,54 @@ namespace TradingSystem.Functions.Services
             }
         }
 
-        public async Task<int> CancelAllOrdersAsync()
+        /// <summary>
+        /// Cancels all open orders. Returns true if successful.
+        /// </summary>
+        public async Task<bool> CancelAllOrdersAsync()
         {
             try
             {
                 var cancelledOrders = await _tradingClient.CancelAllOrdersAsync();
                 var count = cancelledOrders.Count();
                 _logger.LogInformation("Cancelled {count} orders", count);
-                return count;
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to cancel all orders");
-                throw;
+                return false;
             }
         }
 
-        public async Task<List<AccountActivity>> GetAccountActivitiesAsync(DateTime? after = null, DateTime? until = null)
+        /// <summary>
+        /// Gets account activities between dates. Returns List of object for flexibility.
+        /// </summary>
+        public async Task<List<object>> GetAccountActivitiesAsync(DateTime startDate, DateTime endDate)
         {
             try
             {
-                // Use simple request - SDK version may not support all parameters
+                // Use simple request - SDK version compatibility
                 var activities = await _tradingClient.ListAccountActivitiesAsync(
                     new AccountActivitiesRequest());
 
-                var result = activities.AsEnumerable();
+                // Filter by date in memory and return as objects
+                var result = activities
+                    .Where(a => a.ActivityDateTimeUtc >= startDate && a.ActivityDateTimeUtc <= endDate)
+                    .Select(a => (object)new
+                    {
+                        ActivityType = a.ActivityType.ToString(),
+                        ActivityDate = a.ActivityDateTimeUtc,
+                        Id = a.ActivityId
+                    })
+                    .ToList();
 
-                if (after.HasValue)
-                {
-                    result = result.Where(a => a.ActivityDateTime >= after.Value);
-                }
-
-                if (until.HasValue)
-                {
-                    result = result.Where(a => a.ActivityDateTime <= until.Value);
-                }
-
-                return result.Select(a => new AccountActivity
-                {
-                    ActivityType = a.ActivityType.ToString(),
-                    ActivityDateTime = a.ActivityDateTime,
-                    Symbol = (a as ITradeActivity)?.Symbol ?? string.Empty,
-                    Quantity = (int)((a as ITradeActivity)?.Quantity ?? 0),
-                    Price = (a as ITradeActivity)?.Price ?? 0,
-                    Side = (a as ITradeActivity)?.Side.ToString() ?? string.Empty
-                }).ToList();
+                return result;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to get account activities");
-                return new List<AccountActivity>();
+                return new List<object>();
             }
         }
-    }
-
-    public class AccountActivity
-    {
-        public string ActivityType { get; set; } = string.Empty;
-        public DateTime ActivityDateTime { get; set; }
-        public string Symbol { get; set; } = string.Empty;
-        public int Quantity { get; set; }
-        public decimal Price { get; set; }
-        public string Side { get; set; } = string.Empty;
     }
 }
