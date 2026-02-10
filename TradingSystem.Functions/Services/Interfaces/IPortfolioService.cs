@@ -3,58 +3,38 @@
 namespace TradingSystem.Functions.Services.Interfaces
 {
     /// <summary>
-    /// Service for managing portfolio state in the database
+    /// Service for managing portfolio state and positions
     /// </summary>
     public interface IPortfolioService
     {
         /// <summary>
-        /// Syncs portfolio state with Alpaca account data
-        /// Updates portfolio equity, cash, positions, etc.
+        /// Gets the current active portfolio
         /// </summary>
-        /// <param name="accountInfo">Current account information from Alpaca</param>
-        /// <param name="positions">Current positions from Alpaca</param>
-        Task SyncPortfolioStateAsync(AccountInfo accountInfo, List<PositionInfo> positions);
+        Task<Portfolio?> GetCurrentPortfolioAsync();
 
         /// <summary>
-        /// Gets the current portfolio from database
+        /// Syncs portfolio state with broker account data
         /// </summary>
-        /// <returns>Current portfolio</returns>
-        Task<Portfolio> GetCurrentPortfolioAsync();
+        Task SyncPortfolioStateAsync(int portfolioId, AccountInfo accountInfo, List<PositionInfo> positions);
 
         /// <summary>
-        /// Updates portfolio value and related metrics
+        /// Halts trading for a portfolio
         /// </summary>
-        /// <param name="newValue">New portfolio value</param>
-        Task UpdatePortfolioValueAsync(decimal newValue);
+        Task HaltTradingAsync(int portfolioId, string reason);
 
         /// <summary>
-        /// Updates peak value if current value is higher
+        /// Resumes trading for a portfolio
         /// </summary>
-        /// <param name="currentValue">Current portfolio value</param>
-        Task UpdatePeakValueAsync(decimal currentValue);
+        Task ResumeTradingAsync(int portfolioId);
 
         /// <summary>
-        /// Halts trading by setting IsTradingPaused flag
-        /// Used when risk limits are exceeded
+        /// Updates portfolio drawdown and checks risk limits
         /// </summary>
-        /// <param name="reason">Reason for halting (e.g., "20% drawdown exceeded")</param>
-        Task HaltTradingAsync(string reason);
+        Task<DrawdownStatus> UpdateDrawdownAsync(int portfolioId);
 
         /// <summary>
-        /// Resumes trading by clearing IsTradingPaused flag
-        /// Requires manual intervention after trading halt
+        /// Gets all current positions for a portfolio
         /// </summary>
-        Task ResumeTradingAsync();
-
-        /// <summary>
-        /// Updates current drawdown percentage
-        /// </summary>
-        /// <param name="drawdownPercent">Current drawdown (negative number)</param>
-        Task UpdateDrawdownAsync(decimal drawdownPercent);
-
-        /// <summary>
-        /// Calculates holding period for all positions
-        /// </summary>
-        Task UpdateHoldingPeriodsAsync();
+        Task<List<Position>> GetPositionsAsync(int portfolioId);
     }
 }

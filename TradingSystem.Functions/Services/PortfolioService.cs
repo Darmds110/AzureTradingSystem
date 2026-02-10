@@ -7,290 +7,253 @@ using TradingSystem.Functions.Services.Interfaces;
 namespace TradingSystem.Functions.Services
 {
     /// <summary>
-    /// Implementation of portfolio service for managing portfolio state
+    /// Service for managing portfolio state and positions
     /// </summary>
     public class PortfolioService : IPortfolioService
     {
         private readonly TradingDbContext _dbContext;
         private readonly ILogger<PortfolioService> _logger;
 
-        public PortfolioService(
-            TradingDbContext dbContext,
-            ILogger<PortfolioService> logger)
+        public PortfolioService(TradingDbContext dbContext, ILogger<PortfolioService> logger)
         {
             _dbContext = dbContext;
             _logger = logger;
         }
 
         /// <summary>
-        /// Syncs portfolio state with Alpaca account data
+        /// Gets the current active portfolio
         /// </summary>
-        public async Task SyncPortfolioStateAsync(AccountInfo accountInfo, List<PositionInfo> positions)
+        public async Task<Portfolio?> GetCurrentPortfolioAsync()
         {
-            try
-            {
-                _logger.LogInformation("Starting portfolio sync");
-
-                // Get the portfolio (assuming single portfolio for now)
-                var portfolio = await GetCurrentPortfolioAsync();
-                if (portfolio == null)
-                {
-                    _logger.LogError("No portfolio found in database");
-                    throw new InvalidOperationException("Portfolio not found");
-                }
-
-                // Update portfolio values
-                portfolio.CurrentEquity = accountInfo.Equity;
-                portfolio.CurrentCash = accountInfo.Cash;
-                portfolio.BuyingPower = accountInfo.BuyingPower;
-                portfolio.LastSyncTimestamp = DateTime.UtcNow;
-
-                // Update peak value if we've reached a new high
-                if (accountInfo.Equity > portfolio.PeakValue)
-                {
-                    _logger.LogInformation(
-                        "New peak value reached! Old: ${old}, New: ${new}",
-                        portfolio.PeakValue,
-                        accountInfo.Equity);
-                    portfolio.PeakValue = accountInfo.Equity;
-                }
-
-                // Calculate and update drawdown
-                decimal drawdown = 0;
-                if (portfolio.PeakValue > 0)
-                {
-                    drawdown = ((accountInfo.Equity - portfolio.PeakValue) / portfolio.PeakValue) * 100;
-                }
-                portfolio.CurrentDrawdownPercent = drawdown;
-
-                // Sync positions
-                await SyncPositionsAsync(portfolio.PortfolioId, positions);
-
-                // Save changes
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogInformation(
-                    "Portfolio sync complete. Equity: ${equity}, Positions: {count}, Drawdown: {drawdown}%",
-                    accountInfo.Equity,
-                    positions.Count,
-                    drawdown);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error syncing portfolio state");
-                throw;
-            }
+            return await _dbContext.Portfolios
+                .FirstOrDefaultAsync(p => p.IsActive);
         }
 
         /// <summary>
-        /// Syncs positions table with current Alpaca positions
+        /// Syncs portfolio state with broker account data
         /// </summary>
-        private async Task SyncPositionsAsync(int portfolioId, List<PositionInfo> alpacaPositions)
+        public async Task SyncPortfolioStateAsync(int portfolioId, AccountInfo accountInfo, List<PositionInfo> positions)
         {
-            // Get existing positions from database
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
+            if (portfolio == null)
+            {
+                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
+            }
+
+            // Update portfolio with account data
+            portfolio.CurrentCash = accountInfo.Cash;
+            portfolio.CurrentEquity = accountInfo.Equity;
+            portfolio.BuyingPower = accountInfo.BuyingPower;
+            portfolio.LastSyncTimestamp = DateTime.UtcNow;
+
+            // Update peak value if current equity is higher
+            if (accountInfo.Equity > portfolio.PeakValue)
+            {
+                portfolio.PeakValue = accountInfo.Equity;
+                _logger.LogInformation("New peak portfolio value: ${peak}", portfolio.PeakValue);
+            }
+
+            // Calculate current drawdown
+            if (portfolio.PeakValue > 0)
+            {
+                portfolio.CurrentDrawdownPercent = ((portfolio.PeakValue - accountInfo.Equity) / portfolio.PeakValue) * 100;
+            }
+
+            // Sync positions
+            await SyncPositionsAsync(portfolioId, positions);
+
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Portfolio synced: Cash=${cash}, Equity=${equity}, Drawdown={drawdown}%",
+                portfolio.CurrentCash, portfolio.CurrentEquity, portfolio.CurrentDrawdownPercent);
+        }
+
+        /// <summary>
+        /// Syncs positions with broker data
+        /// </summary>
+        private async Task SyncPositionsAsync(int portfolioId, List<PositionInfo> brokerPositions)
+        {
+            // Get existing positions
             var existingPositions = await _dbContext.Positions
                 .Where(p => p.PortfolioId == portfolioId)
                 .ToListAsync();
 
-            // Get list of current symbols from Alpaca
-            var currentSymbols = alpacaPositions.Select(p => p.Symbol).ToList();
+            var brokerSymbols = brokerPositions.Select(p => p.Symbol).ToHashSet();
 
-            // Remove positions that are no longer held
+            // Remove positions that no longer exist at broker
             var positionsToRemove = existingPositions
-                .Where(p => !currentSymbols.Contains(p.Symbol))
+                .Where(p => !brokerSymbols.Contains(p.Symbol))
                 .ToList();
 
-            if (positionsToRemove.Any())
+            if (positionsToRemove.Count > 0)
             {
-                _logger.LogInformation(
-                    "Removing {count} closed positions: {symbols}",
-                    positionsToRemove.Count,
-                    string.Join(", ", positionsToRemove.Select(p => p.Symbol)));
                 _dbContext.Positions.RemoveRange(positionsToRemove);
+                _logger.LogInformation("Removed {count} closed positions", positionsToRemove.Count);
             }
 
             // Update or add positions
-            foreach (var alpacaPos in alpacaPositions)
+            foreach (var brokerPosition in brokerPositions)
             {
-                var existingPos = existingPositions
-                    .FirstOrDefault(p => p.Symbol == alpacaPos.Symbol);
+                var existingPosition = existingPositions.FirstOrDefault(p => p.Symbol == brokerPosition.Symbol);
 
-                if (existingPos != null)
+                if (existingPosition != null)
                 {
                     // Update existing position
-                    existingPos.Quantity = (int)alpacaPos.Quantity;
-                    existingPos.AverageCostBasis = alpacaPos.AverageCostBasis;
-                    existingPos.CurrentPrice = alpacaPos.CurrentPrice;
-                    existingPos.UnrealizedPL = alpacaPos.UnrealizedPL;
-                    existingPos.UnrealizedPLPercent = alpacaPos.UnrealizedPLPercent * 100; // Convert to percentage
-                    existingPos.UpdatedAt = DateTime.UtcNow;
-
-                    _logger.LogDebug(
-                        "Updated position {symbol}: Qty={qty}, P/L=${pl} ({plPct}%)",
-                        existingPos.Symbol,
-                        existingPos.Quantity,
-                        existingPos.UnrealizedPL,
-                        existingPos.UnrealizedPLPercent);
+                    existingPosition.Quantity = brokerPosition.Quantity;
+                    existingPosition.AverageCostBasis = brokerPosition.AverageCostBasis;
+                    existingPosition.CurrentPrice = brokerPosition.CurrentPrice;
+                    existingPosition.UnrealizedProfitLoss = brokerPosition.UnrealizedPL;
+                    existingPosition.UnrealizedProfitLossPercent = brokerPosition.UnrealizedPLPercent;
+                    existingPosition.LastUpdated = DateTime.UtcNow;
                 }
                 else
                 {
                     // Add new position
-                    var newPos = new Position
+                    var newPosition = new Position
                     {
                         PortfolioId = portfolioId,
-                        Symbol = alpacaPos.Symbol,
-                        Quantity = (int)alpacaPos.Quantity,
-                        AverageCostBasis = alpacaPos.AverageCostBasis,
-                        CurrentPrice = alpacaPos.CurrentPrice,
-                        UnrealizedPL = alpacaPos.UnrealizedPL,
-                        UnrealizedPLPercent = alpacaPos.UnrealizedPLPercent * 100,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
+                        Symbol = brokerPosition.Symbol,
+                        Quantity = brokerPosition.Quantity,
+                        AverageCostBasis = brokerPosition.AverageCostBasis,
+                        CurrentPrice = brokerPosition.CurrentPrice,
+                        UnrealizedProfitLoss = brokerPosition.UnrealizedPL,
+                        UnrealizedProfitLossPercent = brokerPosition.UnrealizedPLPercent,
+                        OpenedAt = DateTime.UtcNow,
+                        LastUpdated = DateTime.UtcNow
                     };
-
-                    _dbContext.Positions.Add(newPos);
-
-                    _logger.LogInformation(
-                        "Added new position {symbol}: Qty={qty}, Cost=${cost}",
-                        newPos.Symbol,
-                        newPos.Quantity,
-                        newPos.AverageCostBasis);
+                    _dbContext.Positions.Add(newPosition);
+                    _logger.LogInformation("Added new position: {symbol} x {qty}", brokerPosition.Symbol, brokerPosition.Quantity);
                 }
             }
         }
 
         /// <summary>
-        /// Gets the current portfolio from database
+        /// Halts trading for a portfolio
         /// </summary>
-        public async Task<Portfolio> GetCurrentPortfolioAsync()
+        public async Task HaltTradingAsync(int portfolioId, string reason)
         {
-            var portfolio = await _dbContext.Portfolios
-                .FirstOrDefaultAsync();
-
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
             if (portfolio == null)
             {
-                _logger.LogWarning("No portfolio found in database");
+                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
             }
 
-            return portfolio;
-        }
+            portfolio.IsTradingPaused = true;
+            portfolio.PausedReason = reason;
 
-        /// <summary>
-        /// Updates portfolio value
-        /// </summary>
-        public async Task UpdatePortfolioValueAsync(decimal newValue)
-        {
-            var portfolio = await GetCurrentPortfolioAsync();
-            if (portfolio != null)
+            // Log the halt event
+            var auditLog = new AuditLog
             {
-                portfolio.CurrentEquity = newValue;
-                await _dbContext.SaveChangesAsync();
-                _logger.LogInformation("Portfolio value updated to ${value}", newValue);
-            }
-        }
-
-        /// <summary>
-        /// Updates peak value if current value is higher
-        /// </summary>
-        public async Task UpdatePeakValueAsync(decimal currentValue)
-        {
-            var portfolio = await GetCurrentPortfolioAsync();
-            if (portfolio != null && currentValue > portfolio.PeakValue)
-            {
-                portfolio.PeakValue = currentValue;
-                await _dbContext.SaveChangesAsync();
-                _logger.LogInformation("Peak value updated to ${value}", currentValue);
-            }
-        }
-
-        /// <summary>
-        /// Halts trading by setting flag and logging event
-        /// </summary>
-        public async Task HaltTradingAsync(string reason)
-        {
-            var portfolio = await GetCurrentPortfolioAsync();
-            if (portfolio != null && !portfolio.IsTradingPaused)
-            {
-                portfolio.IsTradingPaused = true;
-                portfolio.PausedReason = reason;
-
-                // Log to audit trail
-                _dbContext.AuditLog.Add(new AuditLog
+                Timestamp = DateTime.UtcNow,
+                EventType = "TRADING_HALT",
+                Severity = "CRITICAL",
+                PortfolioId = portfolioId,
+                Message = $"Trading halted: {reason}",
+                AdditionalDataJson = System.Text.Json.JsonSerializer.Serialize(new
                 {
-                    EventType = "TRADING_HALTED",
-                    EventTimestamp = DateTime.UtcNow,
-                    PortfolioId = portfolio.PortfolioId,
-                    Description = reason,
-                    Severity = "CRITICAL",
-                    MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        CurrentEquity = portfolio.CurrentEquity,
-                        PeakValue = portfolio.PeakValue,
-                        DrawdownPercent = portfolio.CurrentDrawdownPercent
-                    })
-                });
-
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogCritical("TRADING HALTED: {reason}", reason);
-            }
-        }
-
-        /// <summary>
-        /// Resumes trading (manual action required)
-        /// </summary>
-        public async Task ResumeTradingAsync()
-        {
-            var portfolio = await GetCurrentPortfolioAsync();
-            if (portfolio != null && portfolio.IsTradingPaused)
-            {
-                portfolio.IsTradingPaused = false;
-                portfolio.PausedReason = null;
-
-                // Log to audit trail
-                _dbContext.AuditLog.Add(new AuditLog
-                {
-                    EventType = "TRADING_RESUMED",
-                    EventTimestamp = DateTime.UtcNow,
-                    PortfolioId = portfolio.PortfolioId,
-                    Description = "Trading manually resumed",
-                    Severity = "INFO"
-                });
-
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogInformation("Trading resumed manually");
-            }
-        }
-
-        /// <summary>
-        /// Updates current drawdown percentage
-        /// </summary>
-        public async Task UpdateDrawdownAsync(decimal drawdownPercent)
-        {
-            var portfolio = await GetCurrentPortfolioAsync();
-            if (portfolio != null)
-            {
-                portfolio.CurrentDrawdownPercent = drawdownPercent;
-                await _dbContext.SaveChangesAsync();
-            }
-        }
-
-        /// <summary>
-        /// Updates holding periods for all positions
-        /// </summary>
-        public async Task UpdateHoldingPeriodsAsync()
-        {
-            var positions = await _dbContext.Positions.ToListAsync();
-
-            foreach (var position in positions)
-            {
-                var daysSinceCreated = (DateTime.UtcNow - position.CreatedAt).Days;
-                position.HoldingPeriodDays = daysSinceCreated;
-            }
+                    Reason = reason,
+                    CurrentEquity = portfolio.CurrentEquity,
+                    PeakValue = portfolio.PeakValue,
+                    DrawdownPercent = portfolio.CurrentDrawdownPercent
+                })
+            };
+            _dbContext.AuditLogs.Add(auditLog);
 
             await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("Updated holding periods for {count} positions", positions.Count);
+
+            _logger.LogCritical("Trading halted for portfolio {id}: {reason}", portfolioId, reason);
         }
+
+        /// <summary>
+        /// Resumes trading for a portfolio
+        /// </summary>
+        public async Task ResumeTradingAsync(int portfolioId)
+        {
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
+            if (portfolio == null)
+            {
+                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
+            }
+
+            portfolio.IsTradingPaused = false;
+            portfolio.PausedReason = null;
+
+            // Log the resume event
+            var auditLog = new AuditLog
+            {
+                Timestamp = DateTime.UtcNow,
+                EventType = "TRADING_RESUME",
+                Severity = "INFO",
+                PortfolioId = portfolioId,
+                Message = "Trading resumed",
+                AdditionalDataJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    CurrentEquity = portfolio.CurrentEquity,
+                    DrawdownPercent = portfolio.CurrentDrawdownPercent
+                })
+            };
+            _dbContext.AuditLogs.Add(auditLog);
+
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogInformation("Trading resumed for portfolio {id}", portfolioId);
+        }
+
+        /// <summary>
+        /// Updates portfolio drawdown and checks risk limits
+        /// </summary>
+        public async Task<DrawdownStatus> UpdateDrawdownAsync(int portfolioId)
+        {
+            var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
+            if (portfolio == null)
+            {
+                throw new InvalidOperationException($"Portfolio {portfolioId} not found");
+            }
+
+            // Calculate current drawdown
+            var drawdownPercent = 0m;
+            if (portfolio.PeakValue > 0)
+            {
+                drawdownPercent = ((portfolio.PeakValue - portfolio.CurrentEquity) / portfolio.PeakValue) * 100;
+            }
+
+            portfolio.CurrentDrawdownPercent = drawdownPercent;
+            await _dbContext.SaveChangesAsync();
+
+            // Determine status
+            var status = new DrawdownStatus
+            {
+                CurrentDrawdownPercent = drawdownPercent,
+                PeakValue = portfolio.PeakValue,
+                CurrentValue = portfolio.CurrentEquity,
+                ShouldHalt = drawdownPercent >= 20,
+                ShouldWarn = drawdownPercent >= 15 && drawdownPercent < 20
+            };
+
+            return status;
+        }
+
+        /// <summary>
+        /// Gets all current positions for a portfolio
+        /// </summary>
+        public async Task<List<Position>> GetPositionsAsync(int portfolioId)
+        {
+            return await _dbContext.Positions
+                .Where(p => p.PortfolioId == portfolioId)
+                .ToListAsync();
+        }
+    }
+
+    /// <summary>
+    /// Drawdown status for risk monitoring
+    /// </summary>
+    public class DrawdownStatus
+    {
+        public decimal CurrentDrawdownPercent { get; set; }
+        public decimal PeakValue { get; set; }
+        public decimal CurrentValue { get; set; }
+        public bool ShouldHalt { get; set; }
+        public bool ShouldWarn { get; set; }
     }
 }
