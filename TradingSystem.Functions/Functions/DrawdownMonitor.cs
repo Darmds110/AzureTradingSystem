@@ -114,7 +114,8 @@ namespace TradingSystem.Functions.Functions
                 await CheckWarningThresholdsAsync(portfolio, currentEquity, drawdownFromPeak, dailyLoss);
 
                 // Update drawdown in portfolio (for dashboard/reporting)
-                await _portfolioService.UpdateDrawdownAsync(drawdownFromPeak);
+                // Pass portfolioId (int), not drawdownFromPeak (decimal)
+                await _portfolioService.UpdateDrawdownAsync(portfolio.PortfolioId);
             }
             catch (Exception ex)
             {

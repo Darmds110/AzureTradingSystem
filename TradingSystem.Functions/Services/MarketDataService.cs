@@ -21,7 +21,11 @@ public class MarketDataService : IMarketDataService
         _logger = logger;
 
         var secretKey = new SecretKey(config.ApiKey, config.SecretKey);
+
+        // Trading client for clock/calendar
         _alpacaTradingClient = Environments.Paper.GetAlpacaTradingClient(secretKey);
+
+        // Data client for quotes and historical data
         _alpacaDataClient = Environments.Paper.GetAlpacaDataClient(secretKey);
     }
 
@@ -35,6 +39,7 @@ public class MarketDataService : IMarketDataService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error checking if market is open");
+
             var today = DateTime.UtcNow.Date;
             var schedule = await _tableStorage.GetMarketScheduleAsync(today);
             return schedule.isOpen;
@@ -89,6 +94,8 @@ public class MarketDataService : IMarketDataService
                 clock.NextOpenUtc,
                 clock.NextCloseUtc
             );
+
+            _logger.LogInformation("Market schedule update completed");
         }
         catch (Exception ex)
         {
@@ -110,9 +117,7 @@ public class MarketDataService : IMarketDataService
                 return null;
             }
 
-            // Handle nullable TimestampUtc
-            var timestamp = latestTrade.TimestampUtc ?? DateTime.UtcNow;
-
+            // TimestampUtc is non-nullable DateTime in this SDK version
             return new StockQuote
             {
                 Symbol = symbol,
@@ -121,7 +126,7 @@ public class MarketDataService : IMarketDataService
                 High = latestTrade.Price,
                 Low = latestTrade.Price,
                 Volume = 0,
-                Timestamp = timestamp
+                Timestamp = latestTrade.TimestampUtc
             };
         }
         catch (Exception ex)

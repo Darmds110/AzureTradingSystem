@@ -39,7 +39,7 @@ namespace TradingSystem.Functions.Services
                     Cash = account.TradableCash,
                     BuyingPower = account.BuyingPower ?? 0,
                     Status = account.Status.ToString(),
-                    AccountNumber = account.AccountNumber,
+                    AccountNumber = account.AccountNumber ?? string.Empty,
                     RetrievedAt = DateTime.UtcNow
                 };
             }
