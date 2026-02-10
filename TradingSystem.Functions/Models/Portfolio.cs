@@ -1,11 +1,7 @@
-﻿using Alpaca.Markets;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace TradingSystem.Functions.Models;
 
@@ -32,6 +28,24 @@ public class Portfolio
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal PeakValue { get; set; }
+
+    /// <summary>
+    /// Current drawdown from peak as a percentage (negative number)
+    /// Example: -15.5 means 15.5% below peak
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal CurrentDrawdownPercent { get; set; }
+
+    /// <summary>
+    /// Reason why trading was paused (if applicable)
+    /// </summary>
+    [MaxLength(500)]
+    public string? PausedReason { get; set; }
+
+    /// <summary>
+    /// Last time portfolio was synced with Alpaca
+    /// </summary>
+    public DateTime? LastSyncTimestamp { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime LastUpdated { get; set; }

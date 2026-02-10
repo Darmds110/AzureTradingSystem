@@ -117,4 +117,4 @@ namespace TradingSystem.Functions.Functions
             }
         }
     }
-}S
+}

@@ -1,22 +1,24 @@
-﻿namespace TradingSystem.Functions.Models
+﻿using System;
+
+namespace TradingSystem.Functions.Models
 {
     /// <summary>
-    /// Represents a position (holding) in the portfolio from Alpaca
+    /// Represents position information retrieved from Alpaca
     /// </summary>
     public class PositionInfo
     {
         /// <summary>
-        /// Stock symbol (e.g., AAPL, MSFT)
+        /// Stock symbol (e.g., AAPL)
         /// </summary>
         public string Symbol { get; set; } = string.Empty;
 
         /// <summary>
-        /// Number of shares held (can be fractional if enabled)
+        /// Number of shares held
         /// </summary>
         public decimal Quantity { get; set; }
 
         /// <summary>
-        /// Average price paid per share (cost basis)
+        /// Average cost per share
         /// </summary>
         public decimal AverageCostBasis { get; set; }
 
@@ -26,7 +28,7 @@
         public decimal CurrentPrice { get; set; }
 
         /// <summary>
-        /// Total market value of position (quantity * current price)
+        /// Total market value of position
         /// </summary>
         public decimal MarketValue { get; set; }
 
@@ -36,23 +38,18 @@
         public decimal UnrealizedPL { get; set; }
 
         /// <summary>
-        /// Unrealized profit/loss as percentage
+        /// Unrealized profit/loss as a decimal (0.05 = 5%)
         /// </summary>
         public decimal UnrealizedPLPercent { get; set; }
 
         /// <summary>
-        /// Side of the position (long or short)
+        /// Position side (long or short)
         /// </summary>
         public string Side { get; set; } = "long";
 
         /// <summary>
-        /// Asset ID from Alpaca
+        /// Alpaca asset ID
         /// </summary>
         public string AssetId { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Timestamp when position was opened
-        /// </summary>
-        public DateTime? EntryDate { get; set; }
     }
 }
