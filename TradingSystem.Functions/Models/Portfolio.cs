@@ -48,6 +48,11 @@ public class Portfolio
     public DateTime? LastSyncTimestamp { get; set; }
 
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// Maps to 'UpdatedAt' column in database
+    /// </summary>
+    [Column("UpdatedAt")]
     public DateTime LastUpdated { get; set; }
 
     public bool IsActive { get; set; }
