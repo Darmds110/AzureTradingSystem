@@ -21,17 +21,11 @@ namespace TradingSystem.Functions.Services
             _logger = logger;
         }
 
-        /// <summary>
-        /// Sends a generic email
-        /// </summary>
         public async Task SendEmailAsync(string subject, string body)
         {
             await SendEmailInternalAsync(subject, body);
         }
 
-        /// <summary>
-        /// Sends an alert email with priority level
-        /// </summary>
         public async Task SendAlertAsync(string subject, string body, string priority)
         {
             var priorityPrefix = priority.ToUpper() switch
@@ -48,17 +42,25 @@ namespace TradingSystem.Functions.Services
             await SendEmailInternalAsync(fullSubject, fullBody);
         }
 
-        /// <summary>
-        /// Sends a summary email
-        /// </summary>
+        public async Task SendErrorNotificationAsync(string errorMessage)
+        {
+            var subject = "❌ Trading System Error";
+            var body = $"An error occurred in the Trading System.\n\nTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\n\nError:\n{errorMessage}";
+            await SendEmailInternalAsync(subject, body);
+        }
+
+        public async Task SendErrorNotificationAsync(string subject, Exception exception)
+        {
+            var fullSubject = $"❌ Error: {subject}";
+            var body = $"An error occurred in the Trading System.\n\nTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\n\nError: {exception.Message}\n\nStack Trace:\n{exception.StackTrace}";
+            await SendEmailInternalAsync(fullSubject, body);
+        }
+
         public async Task SendSummaryEmailAsync(string subject, string body)
         {
             await SendEmailInternalAsync(subject, body);
         }
 
-        /// <summary>
-        /// Sends a weekly performance summary
-        /// </summary>
         public async Task SendWeeklySummaryAsync(
             decimal portfolioValue,
             decimal weeklyReturn,
@@ -86,9 +88,6 @@ Generated at: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC
             await SendEmailInternalAsync(subject, body);
         }
 
-        /// <summary>
-        /// Sends a monthly performance summary
-        /// </summary>
         public async Task SendMonthlySummaryAsync(
             decimal portfolioValue,
             decimal monthlyReturn,
@@ -126,9 +125,6 @@ Generated at: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC
             await SendEmailInternalAsync(subject, body);
         }
 
-        /// <summary>
-        /// Internal method to send emails
-        /// </summary>
         private async Task SendEmailInternalAsync(string subject, string body)
         {
             try

@@ -26,6 +26,9 @@ public class TradingDbContext : DbContext
     public DbSet<AuditLog> AuditLog { get; set; }
     public DbSet<NotificationHistory> NotificationHistory { get; set; }
 
+    // Alias for code that uses AuditLogs (plural)
+    public DbSet<AuditLog> AuditLogs => AuditLog;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

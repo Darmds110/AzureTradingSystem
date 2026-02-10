@@ -114,7 +114,7 @@ public class MarketDataCollector
         {
             Symbol = symbol,
             DataTimestamp = quote.Timestamp,
-            DataDate = quote.Timestamp.Date,  // ADD THIS LINE
+            DataDate = quote.Timestamp.Date,
             OpenPrice = quote.Open,
             HighPrice = quote.High,
             LowPrice = quote.Low,
@@ -135,8 +135,8 @@ public class MarketDataCollector
         _dbContext.MarketData.Add(marketData);
         await _dbContext.SaveChangesAsync();
 
-        // 4. Cache latest quote in Table Storage
-        await _tableStorage.SaveLatestQuote(symbol, quote.Price, quote.Timestamp);
+        // 4. Cache latest quote in Table Storage - use Async version
+        await _tableStorage.SaveLatestQuoteAsync(symbol, quote.Price, quote.Timestamp);
 
         _logger.LogInformation(
             "Collected data for {Symbol}: Price={Price}, RSI={RSI}, Volume={Volume}",

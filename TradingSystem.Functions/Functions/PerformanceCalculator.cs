@@ -29,7 +29,6 @@ namespace TradingSystem.Functions.Functions
 
         /// <summary>
         /// Timer trigger that runs daily at 5:00 PM ET (22:00 UTC)
-        /// CRON: "0 0 22 * * *" = At 22:00 UTC every day
         /// </summary>
         [Function("PerformanceCalculator")]
         public async Task Run([TimerTrigger("0 0 22 * * *")] TimerInfo timerInfo)
@@ -38,7 +37,6 @@ namespace TradingSystem.Functions.Functions
 
             try
             {
-                // Get current portfolio
                 var portfolio = await _portfolioService.GetCurrentPortfolioAsync();
                 if (portfolio == null)
                 {
@@ -54,7 +52,7 @@ namespace TradingSystem.Functions.Functions
 
                 _logger.LogInformation(
                     "Daily metrics calculated: Return={dailyReturn:F2}%, Total Return={totalReturn:F2}%",
-                    dailyMetrics.DailyReturnPercent,
+                    dailyMetrics.PeriodReturnPercent,
                     dailyMetrics.TotalReturnPercent);
 
                 // Calculate weekly metrics (on Fridays)
@@ -66,15 +64,14 @@ namespace TradingSystem.Functions.Functions
                     _logger.LogInformation(
                         "Weekly metrics calculated: Return={weeklyReturn:F2}%, Win Rate={winRate:F1}%",
                         weeklyMetrics.PeriodReturnPercent,
-                        weeklyMetrics.WinRatePercent);
+                        weeklyMetrics.WinRate);
 
-                    // Send weekly summary email
                     await _emailService.SendWeeklySummaryAsync(
                         weeklyMetrics.PortfolioValue,
-                        weeklyMetrics.PeriodReturnPercent ?? 0,
+                        weeklyMetrics.PeriodReturnPercent,
                         weeklyMetrics.TotalReturnPercent,
-                        weeklyMetrics.TotalTrades,
-                        weeklyMetrics.WinRatePercent ?? 0);
+                        weeklyMetrics.TotalTrades ?? 0,
+                        weeklyMetrics.WinRate ?? 0);
                 }
 
                 // Calculate monthly metrics (on last day of month)
@@ -88,14 +85,13 @@ namespace TradingSystem.Functions.Functions
                         monthlyMetrics.PeriodReturnPercent,
                         monthlyMetrics.SharpeRatio);
 
-                    // Send monthly summary email (Azure costs would need to be fetched separately)
                     await _emailService.SendMonthlySummaryAsync(
                         monthlyMetrics.PortfolioValue,
-                        monthlyMetrics.PeriodReturnPercent ?? 0,
+                        monthlyMetrics.PeriodReturnPercent,
                         monthlyMetrics.TotalReturnPercent,
                         monthlyMetrics.SharpeRatio ?? 0,
-                        monthlyMetrics.DrawdownPercent,
-                        monthlyMetrics.TotalTrades,
+                        monthlyMetrics.MaxDrawdownPercent,
+                        monthlyMetrics.TotalTrades ?? 0,
                         0); // Azure costs placeholder
                 }
 
@@ -110,7 +106,6 @@ namespace TradingSystem.Functions.Functions
                     benchmarkComparison.SpyReturn,
                     benchmarkComparison.QqqReturn);
 
-                // Calculate per-strategy performance
                 await _performanceService.CalculateStrategyPerformanceAsync(portfolio.PortfolioId);
 
                 _logger.LogInformation("Performance calculation complete");

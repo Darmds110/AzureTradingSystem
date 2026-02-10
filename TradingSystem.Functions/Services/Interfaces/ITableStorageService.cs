@@ -5,56 +5,42 @@
     /// </summary>
     public interface ITableStorageService
     {
-        /// <summary>
-        /// Saves market schedule for a date
-        /// </summary>
+        // Market Schedule methods - both naming conventions for compatibility
         Task SaveMarketScheduleAsync(DateTime date, bool isOpen, DateTime? openTime, DateTime? closeTime);
+        Task SaveMarketSchedule(DateTime date, bool isOpen, DateTime? openTime, DateTime? closeTime);
 
-        /// <summary>
-        /// Gets market schedule for a date
-        /// </summary>
-        Task<MarketScheduleEntity?> GetMarketScheduleAsync(DateTime date);
+        Task<MarketScheduleResult> GetMarketScheduleAsync(DateTime date);
+        Task<MarketScheduleResult> GetMarketSchedule(DateTime date);
 
-        /// <summary>
-        /// Checks if market is currently open
-        /// </summary>
         Task<bool> IsMarketOpenAsync();
 
-        /// <summary>
-        /// Saves latest quote for a symbol
-        /// </summary>
+        // Latest Quote methods - both naming conventions for compatibility
         Task SaveLatestQuoteAsync(string symbol, decimal price, DateTime timestamp);
+        Task SaveLatestQuote(string symbol, decimal price, DateTime timestamp);
 
-        /// <summary>
-        /// Gets latest quote for a symbol
-        /// </summary>
         Task<LatestQuoteEntity?> GetLatestQuoteAsync(string symbol);
 
-        /// <summary>
-        /// Sets a cache value with optional expiration
-        /// </summary>
+        // Cache methods
         Task SetCacheValueAsync<T>(string key, T value, TimeSpan? expiration = null);
-
-        /// <summary>
-        /// Gets a cache value
-        /// </summary>
         Task<T?> GetCacheValueAsync<T>(string key);
-
-        /// <summary>
-        /// Removes a cache value
-        /// </summary>
         Task RemoveCacheValueAsync(string key);
     }
 
     /// <summary>
-    /// Market schedule entity for Table Storage
+    /// Market schedule result tuple
     /// </summary>
-    public class MarketScheduleEntity
+    public struct MarketScheduleResult
     {
-        public DateTime Date { get; set; }
-        public bool IsOpen { get; set; }
-        public DateTime? OpenTime { get; set; }
-        public DateTime? CloseTime { get; set; }
+        public bool isOpen;
+        public DateTime? openTime;
+        public DateTime? closeTime;
+
+        public MarketScheduleResult(bool isOpen, DateTime? openTime, DateTime? closeTime)
+        {
+            this.isOpen = isOpen;
+            this.openTime = openTime;
+            this.closeTime = closeTime;
+        }
     }
 
     /// <summary>

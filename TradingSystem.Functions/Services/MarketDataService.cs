@@ -41,7 +41,7 @@ public class MarketDataService : IMarketDataService
             _logger.LogError(ex, "Error checking if market is open");
 
             var today = DateTime.UtcNow.Date;
-            var schedule = await _tableStorage.GetMarketSchedule(today);
+            var schedule = await _tableStorage.GetMarketScheduleAsync(today);
             return schedule.isOpen;
         }
     }
@@ -81,7 +81,8 @@ public class MarketDataService : IMarketDataService
             var clock = await _alpacaTradingClient.GetClockAsync();
             var today = DateTime.UtcNow.Date;
 
-            await _tableStorage.SaveMarketSchedule(
+            // Use Async version
+            await _tableStorage.SaveMarketScheduleAsync(
                 today,
                 clock.IsOpen,
                 clock.NextOpenUtc,
@@ -133,7 +134,7 @@ public class MarketDataService : IMarketDataService
                     High = latestTrade.Price,
                     Low = latestTrade.Price,
                     Volume = 0, // Volume not available in latest trade
-                    Timestamp = latestTrade.TimestampUtc
+                    Timestamp = latestTrade.TimestampUtc ?? DateTime.UtcNow
                 };
             }
             catch (Exception)
@@ -147,7 +148,7 @@ public class MarketDataService : IMarketDataService
                     High = latestTrade.Price,
                     Low = latestTrade.Price,
                     Volume = 0,
-                    Timestamp = latestTrade.TimestampUtc
+                    Timestamp = latestTrade.TimestampUtc ?? DateTime.UtcNow
                 };
             }
         }

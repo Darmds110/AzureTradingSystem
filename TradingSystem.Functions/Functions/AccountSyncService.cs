@@ -37,7 +37,6 @@ namespace TradingSystem.Functions.Functions
 
         /// <summary>
         /// Timer trigger that runs every 15 minutes
-        /// CRON: "0 */15 * * * *" = At minute 0, 15, 30, 45 of every hour
         /// </summary>
         [Function("AccountSyncService")]
         public async Task Run([TimerTrigger("0 */15 * * * *")] TimerInfo myTimer)
@@ -46,11 +45,9 @@ namespace TradingSystem.Functions.Functions
 
             try
             {
-                // Check if market is open (optional - can sync even when closed for overnight changes)
                 var isMarketOpen = await _tableStorageService.IsMarketOpenAsync();
                 _logger.LogInformation("Market open status: {status}", isMarketOpen);
 
-                // Get current portfolio to check if trading is halted
                 var portfolio = await _portfolioService.GetCurrentPortfolioAsync();
                 if (portfolio == null)
                 {
@@ -58,18 +55,15 @@ namespace TradingSystem.Functions.Functions
                     return;
                 }
 
-                // Still sync even if trading is halted (to track recovery)
                 if (portfolio.IsTradingPaused)
                 {
                     _logger.LogWarning("Trading is currently HALTED. Reason: {reason}. Still syncing for monitoring.",
                         portfolio.PausedReason);
                 }
 
-                // Fetch account info from Alpaca
                 _logger.LogInformation("Fetching account information from Alpaca...");
                 var accountInfo = await _alpacaService.GetAccountInfoAsync();
 
-                // Fetch current positions from Alpaca
                 _logger.LogInformation("Fetching positions from Alpaca...");
                 var positions = await _alpacaService.GetPositionsAsync();
 
@@ -79,29 +73,31 @@ namespace TradingSystem.Functions.Functions
                     accountInfo.Cash,
                     positions.Count);
 
-                // Sync portfolio state to database
+                // Use 2-parameter version
                 await _portfolioService.SyncPortfolioStateAsync(accountInfo, positions);
 
                 // Re-fetch portfolio to get updated values
                 portfolio = await _portfolioService.GetCurrentPortfolioAsync();
 
-                // Check drawdown and handle risk management
-                await CheckDrawdownAndManageRiskAsync(portfolio, accountInfo);
+                if (portfolio != null)
+                {
+                    // Check drawdown and handle risk management
+                    await CheckDrawdownAndManageRiskAsync(portfolio, accountInfo);
 
-                // Update holding periods for positions
-                await _portfolioService.UpdateHoldingPeriodsAsync();
+                    // Update holding periods for positions
+                    await _portfolioService.UpdateHoldingPeriodsAsync();
 
-                _logger.LogInformation(
-                    "Account sync complete. Equity: ${equity}, Drawdown: {drawdown:F2}%, Trading Halted: {halted}",
-                    portfolio.CurrentEquity,
-                    portfolio.CurrentDrawdownPercent,
-                    portfolio.IsTradingPaused);
+                    _logger.LogInformation(
+                        "Account sync complete. Equity: ${equity}, Drawdown: {drawdown:F2}%, Trading Halted: {halted}",
+                        portfolio.CurrentEquity,
+                        portfolio.CurrentDrawdownPercent,
+                        portfolio.IsTradingPaused);
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in AccountSyncService");
 
-                // Send alert email on failure
                 try
                 {
                     await _emailService.SendAlertAsync(
@@ -114,13 +110,10 @@ namespace TradingSystem.Functions.Functions
                     _logger.LogError(emailEx, "Failed to send error alert email");
                 }
 
-                throw; // Re-throw to mark function as failed
+                throw;
             }
         }
 
-        /// <summary>
-        /// Checks current drawdown and manages risk accordingly
-        /// </summary>
         private async Task CheckDrawdownAndManageRiskAsync(Portfolio portfolio, AccountInfo accountInfo)
         {
             var drawdown = portfolio.CurrentDrawdownPercent;
@@ -135,11 +128,10 @@ namespace TradingSystem.Functions.Functions
                     "CRITICAL: Drawdown of {drawdown:F2}% exceeds {threshold}% threshold. HALTING TRADING.",
                     drawdown, DRAWDOWN_HALT_THRESHOLD);
 
-                // Halt trading
+                // Use 1-parameter version
                 await _portfolioService.HaltTradingAsync(
                     $"Drawdown of {drawdown:F2}% exceeded {DRAWDOWN_HALT_THRESHOLD}% threshold");
 
-                // Send critical alert
                 await _emailService.SendAlertAsync(
                     "🚨 CRITICAL: Trading Halted - Drawdown Exceeded",
                     $"Trading has been automatically HALTED due to excessive drawdown.\n\n" +
@@ -162,7 +154,6 @@ namespace TradingSystem.Functions.Functions
                     "WARNING: Drawdown of {drawdown:F2}% is approaching {threshold}% halt threshold.",
                     drawdown, DRAWDOWN_HALT_THRESHOLD);
 
-                // Send warning alert (only once per day to avoid spam)
                 var lastWarningKey = $"DrawdownWarning_{DateTime.UtcNow:yyyy-MM-dd}";
                 var alreadyWarned = await _tableStorageService.GetCacheValueAsync<bool>(lastWarningKey);
 
@@ -179,12 +170,10 @@ namespace TradingSystem.Functions.Functions
                         $"Trading will be automatically halted if drawdown reaches {DRAWDOWN_HALT_THRESHOLD}%.",
                         "HIGH");
 
-                    // Mark that we've sent warning today
                     await _tableStorageService.SetCacheValueAsync(lastWarningKey, true, TimeSpan.FromHours(24));
                 }
             }
 
-            // If we were previously warned but recovered, log it
             if (drawdown > DRAWDOWN_WARNING_THRESHOLD && portfolio.CurrentDrawdownPercent <= DRAWDOWN_WARNING_THRESHOLD)
             {
                 _logger.LogInformation("Portfolio has recovered above warning threshold. Current drawdown: {drawdown:F2}%", drawdown);

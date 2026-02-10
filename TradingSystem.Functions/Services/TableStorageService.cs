@@ -33,9 +33,7 @@ namespace TradingSystem.Functions.Services
             _cacheTable.CreateIfNotExists();
         }
 
-        /// <summary>
-        /// Saves market schedule for a date
-        /// </summary>
+        // SaveMarketSchedule - both versions
         public async Task SaveMarketScheduleAsync(DateTime date, bool isOpen, DateTime? openTime, DateTime? closeTime)
         {
             var entity = new TableEntity("MarketSchedule", date.ToString("yyyy-MM-dd"))
@@ -50,10 +48,11 @@ namespace TradingSystem.Functions.Services
             _logger.LogDebug("Saved market schedule for {date}: IsOpen={isOpen}", date, isOpen);
         }
 
-        /// <summary>
-        /// Gets market schedule for a date
-        /// </summary>
-        public async Task<MarketScheduleEntity?> GetMarketScheduleAsync(DateTime date)
+        public Task SaveMarketSchedule(DateTime date, bool isOpen, DateTime? openTime, DateTime? closeTime)
+            => SaveMarketScheduleAsync(date, isOpen, openTime, closeTime);
+
+        // GetMarketSchedule - both versions
+        public async Task<MarketScheduleResult> GetMarketScheduleAsync(DateTime date)
         {
             try
             {
@@ -61,38 +60,36 @@ namespace TradingSystem.Functions.Services
                     "MarketSchedule", date.ToString("yyyy-MM-dd"));
 
                 var entity = response.Value;
-                return new MarketScheduleEntity
-                {
-                    Date = date,
-                    IsOpen = entity.GetBoolean("IsOpen") ?? false,
-                    OpenTime = DateTime.TryParse(entity.GetString("OpenTime"), out var open) ? open : null,
-                    CloseTime = DateTime.TryParse(entity.GetString("CloseTime"), out var close) ? close : null
-                };
+                var isOpen = entity.GetBoolean("IsOpen") ?? false;
+                var openTime = DateTime.TryParse(entity.GetString("OpenTime"), out var open) ? open : (DateTime?)null;
+                var closeTime = DateTime.TryParse(entity.GetString("CloseTime"), out var close) ? close : (DateTime?)null;
+
+                return new MarketScheduleResult(isOpen, openTime, closeTime);
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
             {
-                return null;
+                return new MarketScheduleResult(false, null, null);
             }
         }
 
-        /// <summary>
-        /// Checks if market is currently open
-        /// </summary>
+        public Task<MarketScheduleResult> GetMarketSchedule(DateTime date)
+            => GetMarketScheduleAsync(date);
+
         public async Task<bool> IsMarketOpenAsync()
         {
             var now = DateTime.UtcNow;
             var today = now.Date;
 
             var schedule = await GetMarketScheduleAsync(today);
-            if (schedule == null || !schedule.IsOpen)
+            if (!schedule.isOpen)
             {
                 return false;
             }
 
             // Check if current time is within market hours
-            if (schedule.OpenTime.HasValue && schedule.CloseTime.HasValue)
+            if (schedule.openTime.HasValue && schedule.closeTime.HasValue)
             {
-                return now >= schedule.OpenTime.Value && now <= schedule.CloseTime.Value;
+                return now >= schedule.openTime.Value && now <= schedule.closeTime.Value;
             }
 
             // Default NYSE hours: 9:30 AM - 4:00 PM ET
@@ -105,9 +102,7 @@ namespace TradingSystem.Functions.Services
             return etNow.TimeOfDay >= marketOpen && etNow.TimeOfDay <= marketClose;
         }
 
-        /// <summary>
-        /// Saves latest quote for a symbol
-        /// </summary>
+        // SaveLatestQuote - both versions
         public async Task SaveLatestQuoteAsync(string symbol, decimal price, DateTime timestamp)
         {
             var entity = new TableEntity("Quotes", symbol)
@@ -121,9 +116,9 @@ namespace TradingSystem.Functions.Services
             _logger.LogDebug("Saved quote for {symbol}: ${price}", symbol, price);
         }
 
-        /// <summary>
-        /// Gets latest quote for a symbol
-        /// </summary>
+        public Task SaveLatestQuote(string symbol, decimal price, DateTime timestamp)
+            => SaveLatestQuoteAsync(symbol, price, timestamp);
+
         public async Task<LatestQuoteEntity?> GetLatestQuoteAsync(string symbol)
         {
             try
@@ -144,9 +139,6 @@ namespace TradingSystem.Functions.Services
             }
         }
 
-        /// <summary>
-        /// Sets a cache value with optional expiration
-        /// </summary>
         public async Task SetCacheValueAsync<T>(string key, T value, TimeSpan? expiration = null)
         {
             var json = JsonSerializer.Serialize(value);
@@ -163,9 +155,6 @@ namespace TradingSystem.Functions.Services
             _logger.LogDebug("Cached value for key: {key}", key);
         }
 
-        /// <summary>
-        /// Gets a cache value
-        /// </summary>
         public async Task<T?> GetCacheValueAsync<T>(string key)
         {
             try
@@ -177,7 +166,6 @@ namespace TradingSystem.Functions.Services
                 var expiresAt = entity.GetDateTime("ExpiresAt");
                 if (expiresAt.HasValue && expiresAt.Value < DateTime.UtcNow)
                 {
-                    // Expired - remove and return default
                     await RemoveCacheValueAsync(key);
                     return default;
                 }
@@ -196,9 +184,6 @@ namespace TradingSystem.Functions.Services
             }
         }
 
-        /// <summary>
-        /// Removes a cache value
-        /// </summary>
         public async Task RemoveCacheValueAsync(string key)
         {
             try

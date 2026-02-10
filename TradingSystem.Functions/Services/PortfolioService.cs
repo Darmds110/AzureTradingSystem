@@ -20,18 +20,25 @@ namespace TradingSystem.Functions.Services
             _logger = logger;
         }
 
-        /// <summary>
-        /// Gets the current active portfolio
-        /// </summary>
         public async Task<Portfolio?> GetCurrentPortfolioAsync()
         {
             return await _dbContext.Portfolios
                 .FirstOrDefaultAsync(p => p.IsActive);
         }
 
-        /// <summary>
-        /// Syncs portfolio state with broker account data
-        /// </summary>
+        // 2-parameter version for backward compatibility
+        public async Task SyncPortfolioStateAsync(AccountInfo accountInfo, List<PositionInfo> positions)
+        {
+            var portfolio = await GetCurrentPortfolioAsync();
+            if (portfolio == null)
+            {
+                throw new InvalidOperationException("No active portfolio found");
+            }
+
+            await SyncPortfolioStateAsync(portfolio.PortfolioId, accountInfo, positions);
+        }
+
+        // 3-parameter version
         public async Task SyncPortfolioStateAsync(int portfolioId, AccountInfo accountInfo, List<PositionInfo> positions)
         {
             var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
@@ -45,6 +52,7 @@ namespace TradingSystem.Functions.Services
             portfolio.CurrentEquity = accountInfo.Equity;
             portfolio.BuyingPower = accountInfo.BuyingPower;
             portfolio.LastSyncTimestamp = DateTime.UtcNow;
+            portfolio.LastUpdated = DateTime.UtcNow;
 
             // Update peak value if current equity is higher
             if (accountInfo.Equity > portfolio.PeakValue)
@@ -69,12 +77,8 @@ namespace TradingSystem.Functions.Services
                 portfolio.CurrentCash, portfolio.CurrentEquity, portfolio.CurrentDrawdownPercent);
         }
 
-        /// <summary>
-        /// Syncs positions with broker data
-        /// </summary>
         private async Task SyncPositionsAsync(int portfolioId, List<PositionInfo> brokerPositions)
         {
-            // Get existing positions
             var existingPositions = await _dbContext.Positions
                 .Where(p => p.PortfolioId == portfolioId)
                 .ToListAsync();
@@ -99,7 +103,6 @@ namespace TradingSystem.Functions.Services
 
                 if (existingPosition != null)
                 {
-                    // Update existing position
                     existingPosition.Quantity = brokerPosition.Quantity;
                     existingPosition.AverageCostBasis = brokerPosition.AverageCostBasis;
                     existingPosition.CurrentPrice = brokerPosition.CurrentPrice;
@@ -109,7 +112,6 @@ namespace TradingSystem.Functions.Services
                 }
                 else
                 {
-                    // Add new position
                     var newPosition = new Position
                     {
                         PortfolioId = portfolioId,
@@ -128,9 +130,19 @@ namespace TradingSystem.Functions.Services
             }
         }
 
-        /// <summary>
-        /// Halts trading for a portfolio
-        /// </summary>
+        // 1-parameter version (uses current portfolio)
+        public async Task HaltTradingAsync(string reason)
+        {
+            var portfolio = await GetCurrentPortfolioAsync();
+            if (portfolio == null)
+            {
+                throw new InvalidOperationException("No active portfolio found");
+            }
+
+            await HaltTradingAsync(portfolio.PortfolioId, reason);
+        }
+
+        // 2-parameter version
         public async Task HaltTradingAsync(int portfolioId, string reason)
         {
             var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
@@ -158,16 +170,13 @@ namespace TradingSystem.Functions.Services
                     DrawdownPercent = portfolio.CurrentDrawdownPercent
                 })
             };
-            _dbContext.AuditLogs.Add(auditLog);
+            _dbContext.AuditLog.Add(auditLog);
 
             await _dbContext.SaveChangesAsync();
 
             _logger.LogCritical("Trading halted for portfolio {id}: {reason}", portfolioId, reason);
         }
 
-        /// <summary>
-        /// Resumes trading for a portfolio
-        /// </summary>
         public async Task ResumeTradingAsync(int portfolioId)
         {
             var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
@@ -179,7 +188,6 @@ namespace TradingSystem.Functions.Services
             portfolio.IsTradingPaused = false;
             portfolio.PausedReason = null;
 
-            // Log the resume event
             var auditLog = new AuditLog
             {
                 Timestamp = DateTime.UtcNow,
@@ -193,16 +201,13 @@ namespace TradingSystem.Functions.Services
                     DrawdownPercent = portfolio.CurrentDrawdownPercent
                 })
             };
-            _dbContext.AuditLogs.Add(auditLog);
+            _dbContext.AuditLog.Add(auditLog);
 
             await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Trading resumed for portfolio {id}", portfolioId);
         }
 
-        /// <summary>
-        /// Updates portfolio drawdown and checks risk limits
-        /// </summary>
         public async Task<DrawdownStatus> UpdateDrawdownAsync(int portfolioId)
         {
             var portfolio = await _dbContext.Portfolios.FindAsync(portfolioId);
@@ -211,7 +216,6 @@ namespace TradingSystem.Functions.Services
                 throw new InvalidOperationException($"Portfolio {portfolioId} not found");
             }
 
-            // Calculate current drawdown
             var drawdownPercent = 0m;
             if (portfolio.PeakValue > 0)
             {
@@ -221,8 +225,7 @@ namespace TradingSystem.Functions.Services
             portfolio.CurrentDrawdownPercent = drawdownPercent;
             await _dbContext.SaveChangesAsync();
 
-            // Determine status
-            var status = new DrawdownStatus
+            return new DrawdownStatus
             {
                 CurrentDrawdownPercent = drawdownPercent,
                 PeakValue = portfolio.PeakValue,
@@ -230,30 +233,38 @@ namespace TradingSystem.Functions.Services
                 ShouldHalt = drawdownPercent >= 20,
                 ShouldWarn = drawdownPercent >= 15 && drawdownPercent < 20
             };
-
-            return status;
         }
 
-        /// <summary>
-        /// Gets all current positions for a portfolio
-        /// </summary>
+        public async Task UpdateHoldingPeriodsAsync()
+        {
+            var portfolio = await GetCurrentPortfolioAsync();
+            if (portfolio == null)
+            {
+                return;
+            }
+
+            var positions = await _dbContext.Positions
+                .Where(p => p.PortfolioId == portfolio.PortfolioId)
+                .ToListAsync();
+
+            // Holding period is calculated as days since OpenedAt
+            // This is informational and doesn't need to be stored in the Position model
+            // It's calculated on-the-fly when needed
+
+            foreach (var position in positions)
+            {
+                var holdingDays = (DateTime.UtcNow - position.OpenedAt).Days;
+                _logger.LogDebug("Position {symbol}: Holding for {days} days", position.Symbol, holdingDays);
+            }
+
+            _logger.LogInformation("Updated holding periods for {count} positions", positions.Count);
+        }
+
         public async Task<List<Position>> GetPositionsAsync(int portfolioId)
         {
             return await _dbContext.Positions
                 .Where(p => p.PortfolioId == portfolioId)
                 .ToListAsync();
         }
-    }
-
-    /// <summary>
-    /// Drawdown status for risk monitoring
-    /// </summary>
-    public class DrawdownStatus
-    {
-        public decimal CurrentDrawdownPercent { get; set; }
-        public decimal PeakValue { get; set; }
-        public decimal CurrentValue { get; set; }
-        public bool ShouldHalt { get; set; }
-        public bool ShouldWarn { get; set; }
     }
 }

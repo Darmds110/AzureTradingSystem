@@ -43,7 +43,6 @@ namespace TradingSystem.Functions.Functions
 
             try
             {
-                // Get portfolio data
                 var portfolio = await _portfolioService.GetCurrentPortfolioAsync();
                 if (portfolio == null)
                 {
@@ -51,13 +50,9 @@ namespace TradingSystem.Functions.Functions
                     return;
                 }
 
-                // Get today's performance metrics
                 var todayMetrics = await _performanceService.GetLatestMetricsAsync(portfolio.PortfolioId);
-
-                // Get positions from Alpaca
                 var positions = await _alpacaService.GetPositionsAsync();
 
-                // Get trade statistics
                 var today = DateTime.UtcNow.Date;
                 var weekStart = today.AddDays(-(int)today.DayOfWeek);
                 var monthStart = new DateTime(today.Year, today.Month, 1);
@@ -66,19 +61,16 @@ namespace TradingSystem.Functions.Functions
                 var weekStats = await _performanceService.GetTradeStatisticsAsync(portfolio.PortfolioId, weekStart, today);
                 var monthStats = await _performanceService.GetTradeStatisticsAsync(portfolio.PortfolioId, monthStart, today);
 
-                // Get benchmark comparison
                 var benchmarks = await _performanceService.CompareToBenchmarksAsync(portfolio.PortfolioId, today);
 
-                // Build email content
                 var emailBody = BuildDailySummaryEmail(portfolio, todayMetrics, positions,
                     todayStats, weekStats, monthStats, benchmarks);
 
-                // Determine subject based on performance
-                var dailyReturn = todayMetrics?.DailyReturnPercent ?? 0;
+                // Use PeriodReturnPercent instead of DailyReturnPercent
+                var dailyReturn = todayMetrics?.PeriodReturnPercent ?? 0;
                 var emoji = dailyReturn >= 0 ? "📈" : "📉";
                 var subject = $"{emoji} Daily Portfolio Summary: {dailyReturn:+0.00;-0.00}% | ${portfolio.CurrentEquity:N2}";
 
-                // Send email
                 await _emailService.SendSummaryEmailAsync(subject, emailBody);
 
                 _logger.LogInformation("Daily summary email sent successfully");
@@ -103,9 +95,6 @@ namespace TradingSystem.Functions.Functions
             }
         }
 
-        /// <summary>
-        /// Builds the daily summary email HTML content
-        /// </summary>
         private string BuildDailySummaryEmail(
             Portfolio portfolio,
             PerformanceMetrics? todayMetrics,
@@ -131,9 +120,9 @@ namespace TradingSystem.Functions.Functions
             sb.AppendLine($"<tr><td>Initial Capital:</td><td style='text-align: right;'>${portfolio.InitialCapital:N2}</td></tr>");
             sb.AppendLine("</table>");
 
-            // Today's Performance
+            // Today's Performance - use PeriodReturnPercent
             sb.AppendLine("<h3>📈 Today's Performance</h3>");
-            var dailyReturn = todayMetrics?.DailyReturnPercent ?? 0;
+            var dailyReturn = todayMetrics?.PeriodReturnPercent ?? 0;
             var dailyColor = dailyReturn >= 0 ? "green" : "red";
             sb.AppendLine($"<p style='font-size: 24px; color: {dailyColor};'><strong>{dailyReturn:+0.00;-0.00}%</strong></p>");
 
