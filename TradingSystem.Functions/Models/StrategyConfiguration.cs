@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -17,31 +13,42 @@ public class StrategyConfiguration
     [MaxLength(100)]
     public string StrategyName { get; set; } = string.Empty;
 
-    [Required]
     [MaxLength(50)]
-    public string StrategyType { get; set; } = string.Empty;
+    public string? StrategyType { get; set; }
 
-    [Column(TypeName = "nvarchar(max)")]
+    [MaxLength(500)]
     public string? Description { get; set; }
 
-    [Column(TypeName = "nvarchar(max)")]
+    /// <summary>
+    /// JSON configuration containing entry and exit rules
+    /// Maps to 'ConfigurationJson' column in database
+    /// </summary>
+    [Column("ConfigurationJson")]
     public string? EntryRulesJson { get; set; }
 
-    [Column(TypeName = "nvarchar(max)")]
+    /// <summary>
+    /// For backward compatibility - not stored separately in DB
+    /// </summary>
+    [NotMapped]
     public string? ExitRulesJson { get; set; }
+
+    public bool IsActive { get; set; }
 
     [Column(TypeName = "decimal(5,2)")]
     public decimal MaxPositionSizePercent { get; set; }
 
     public int MaxConcurrentPositions { get; set; }
 
-    public bool IsActive { get; set; }
-
     public int Version { get; set; }
 
     public DateTime CreatedAt { get; set; }
-    public DateTime LastModified { get; set; }
 
-    // Navigation property
-    public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
+    /// <summary>
+    /// Maps to 'UpdatedAt' column in database
+    /// </summary>
+    [Column("UpdatedAt")]
+    public DateTime? LastModified { get; set; }
+
+    [MaxLength(100)]
+    public string? CreatedBy { get; set; }
 }
