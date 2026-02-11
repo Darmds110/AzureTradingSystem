@@ -293,7 +293,6 @@ namespace TradingSystem.Functions.Services
                 QqqReturn = qqqReturn,
                 AlphaVsSpy = portfolioReturn - spyReturn,
                 AlphaVsQqq = portfolioReturn - qqqReturn,
-                AsOfDate = asOfDate
             };
 
             _logger.LogInformation(
