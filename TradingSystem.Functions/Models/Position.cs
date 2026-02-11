@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -13,7 +9,6 @@ public class Position
     [Key]
     public int PositionId { get; set; }
 
-    [Required]
     public int PortfolioId { get; set; }
 
     [Required]
@@ -22,22 +17,38 @@ public class Position
 
     public int Quantity { get; set; }
 
-    [Column(TypeName = "decimal(18,4)")]
+    [Column(TypeName = "decimal(18,2)")]
     public decimal AverageCostBasis { get; set; }
 
-    [Column(TypeName = "decimal(18,4)")]
+    [Column(TypeName = "decimal(18,2)")]
     public decimal CurrentPrice { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal MarketValue { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnrealizedProfitLoss { get; set; }
 
-    [Column(TypeName = "decimal(10,4)")]
+    [Column(TypeName = "decimal(18,2)")]
     public decimal UnrealizedProfitLossPercent { get; set; }
 
+    /// <summary>
+    /// Maps to 'FirstPurchaseDate' column in database
+    /// </summary>
+    [Column("FirstPurchaseDate")]
     public DateTime OpenedAt { get; set; }
+
+    /// <summary>
+    /// Maps to 'LastUpdateDate' column in database
+    /// </summary>
+    [Column("LastUpdateDate")]
     public DateTime LastUpdated { get; set; }
+
+    public int HoldingPeriodDays { get; set; }
+
+    public bool IsActive { get; set; }
 
     // Navigation property
     [ForeignKey("PortfolioId")]
-    public virtual Portfolio Portfolio { get; set; } = null!;
+    public virtual Portfolio? Portfolio { get; set; }
 }
