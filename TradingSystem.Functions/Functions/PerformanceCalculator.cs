@@ -29,6 +29,7 @@ namespace TradingSystem.Functions.Functions
 
         /// <summary>
         /// Timer trigger that runs daily at 5:00 PM ET (22:00 UTC)
+        /// CRON: "0 0 22 * * *" = At 22:00 UTC every day
         /// </summary>
         [Function("PerformanceCalculator")]
         public async Task Run([TimerTrigger("0 0 22 * * *")] TimerInfo timerInfo)
@@ -37,6 +38,7 @@ namespace TradingSystem.Functions.Functions
 
             try
             {
+                // Get current portfolio
                 var portfolio = await _portfolioService.GetCurrentPortfolioAsync();
                 if (portfolio == null)
                 {
@@ -64,13 +66,14 @@ namespace TradingSystem.Functions.Functions
                     _logger.LogInformation(
                         "Weekly metrics calculated: Return={weeklyReturn:F2}%, Win Rate={winRate:F1}%",
                         weeklyMetrics.PeriodReturnPercent,
-                        weeklyMetrics.WinRate);
+                        weeklyMetrics.WinRate ?? 0);
 
+                    // Send weekly summary email
                     await _emailService.SendWeeklySummaryAsync(
                         weeklyMetrics.PortfolioValue,
                         weeklyMetrics.PeriodReturnPercent,
                         weeklyMetrics.TotalReturnPercent,
-                        weeklyMetrics.TotalTrades ?? 0,
+                        weeklyMetrics.TotalTrades,
                         weeklyMetrics.WinRate ?? 0);
                 }
 
@@ -83,15 +86,16 @@ namespace TradingSystem.Functions.Functions
                     _logger.LogInformation(
                         "Monthly metrics calculated: Return={monthlyReturn:F2}%, Sharpe={sharpe:F2}",
                         monthlyMetrics.PeriodReturnPercent,
-                        monthlyMetrics.SharpeRatio);
+                        monthlyMetrics.SharpeRatio ?? 0);
 
+                    // Send monthly summary email (Azure costs would need to be fetched separately)
                     await _emailService.SendMonthlySummaryAsync(
                         monthlyMetrics.PortfolioValue,
                         monthlyMetrics.PeriodReturnPercent,
                         monthlyMetrics.TotalReturnPercent,
                         monthlyMetrics.SharpeRatio ?? 0,
                         monthlyMetrics.MaxDrawdownPercent,
-                        monthlyMetrics.TotalTrades ?? 0,
+                        monthlyMetrics.TotalTrades,
                         0); // Azure costs placeholder
                 }
 
@@ -106,6 +110,7 @@ namespace TradingSystem.Functions.Functions
                     benchmarkComparison.SpyReturn,
                     benchmarkComparison.QqqReturn);
 
+                // Calculate per-strategy performance
                 await _performanceService.CalculateStrategyPerformanceAsync(portfolio.PortfolioId);
 
                 _logger.LogInformation("Performance calculation complete");
