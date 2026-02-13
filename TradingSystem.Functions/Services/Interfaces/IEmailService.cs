@@ -8,19 +8,11 @@ public interface IEmailService
     /// <summary>
     /// Send a generic email.
     /// </summary>
-    /// <param name="subject">Email subject line</param>
-    /// <param name="body">Email body content</param>
-    /// <param name="isHtml">Whether the body is HTML formatted</param>
     Task SendEmailAsync(string subject, string body, bool isHtml = false);
 
     /// <summary>
     /// Send a daily portfolio summary email.
     /// </summary>
-    /// <param name="portfolioValue">Current portfolio value</param>
-    /// <param name="cashBalance">Current cash balance</param>
-    /// <param name="dailyReturnPercent">Today's return percentage</param>
-    /// <param name="totalReturnPercent">Total return since inception</param>
-    /// <param name="positions">List of current positions with details</param>
     Task SendDailySummaryAsync(
         decimal portfolioValue,
         decimal cashBalance,
@@ -29,22 +21,50 @@ public interface IEmailService
         IEnumerable<PositionSummary>? positions = null);
 
     /// <summary>
+    /// Send a weekly portfolio summary email.
+    /// </summary>
+    Task SendWeeklySummaryAsync(
+        decimal portfolioValue,
+        decimal weeklyReturnPercent,
+        decimal totalReturnPercent,
+        int tradesThisWeek,
+        decimal weeklyProfitLoss);
+
+    /// <summary>
+    /// Send a monthly portfolio summary email.
+    /// </summary>
+    Task SendMonthlySummaryAsync(
+        decimal portfolioValue,
+        decimal monthlyReturnPercent,
+        decimal totalReturnPercent,
+        int tradesThisMonth,
+        decimal monthlyProfitLoss,
+        decimal azureCosts);
+
+    /// <summary>
+    /// Send a generic summary email (used by DailyPortfolioSummary function).
+    /// </summary>
+    Task SendSummaryEmailAsync(string subject, string htmlBody);
+
+    /// <summary>
     /// Send a risk alert email.
     /// </summary>
     /// <param name="alertType">Type of alert (Warning, Critical, etc.)</param>
     /// <param name="message">Alert message</param>
-    /// <param name="currentDrawdown">Current drawdown percentage</param>
+    /// <param name="currentDrawdown">Current drawdown percentage (optional)</param>
     Task SendAlertAsync(string alertType, string message, decimal? currentDrawdown = null);
+
+    /// <summary>
+    /// Send an error notification email.
+    /// </summary>
+    /// <param name="functionName">Name of the function that failed</param>
+    /// <param name="errorMessage">Error message</param>
+    /// <param name="exception">Optional exception details</param>
+    Task SendErrorNotificationAsync(string functionName, string errorMessage, Exception? exception = null);
 
     /// <summary>
     /// Send a trade notification email.
     /// </summary>
-    /// <param name="tradeType">BUY or SELL</param>
-    /// <param name="symbol">Stock symbol</param>
-    /// <param name="quantity">Number of shares</param>
-    /// <param name="price">Execution price</param>
-    /// <param name="totalValue">Total trade value</param>
-    /// <param name="reason">Reason for the trade (strategy name, etc.)</param>
     Task SendTradeNotificationAsync(
         string tradeType,
         string symbol,

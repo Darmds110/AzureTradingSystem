@@ -86,6 +86,11 @@ public class EmailService : IEmailService
         }
     }
 
+    public async Task SendSummaryEmailAsync(string subject, string htmlBody)
+    {
+        await SendEmailAsync(subject, htmlBody, isHtml: true);
+    }
+
     public async Task SendDailySummaryAsync(
         decimal portfolioValue,
         decimal cashBalance,
@@ -93,45 +98,12 @@ public class EmailService : IEmailService
         decimal totalReturnPercent,
         IEnumerable<PositionSummary>? positions = null)
     {
-        var etTime = TimeZoneInfo.ConvertTimeFromUtc(
-            DateTime.UtcNow,
-            TimeZoneInfo.FindSystemTimeZoneById("America/New_York")
-        );
+        var etTime = GetEasternTime();
 
         var emoji = dailyReturnPercent >= 0 ? "📈" : "📉";
         var subject = $"{emoji} Daily Portfolio Summary: {dailyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
 
-        var positionsHtml = "";
-        if (positions != null && positions.Any())
-        {
-            var positionRows = string.Join("\n", positions.Select(p => $@"
-                <tr>
-                    <td><strong>{p.Symbol}</strong></td>
-                    <td>{p.Quantity}</td>
-                    <td>${p.AverageCost:N2}</td>
-                    <td>${p.CurrentPrice:N2}</td>
-                    <td style='color: {(p.UnrealizedPL >= 0 ? "green" : "red")}'>${p.UnrealizedPL:N2} ({p.UnrealizedPLPercent:+0.00;-0.00}%)</td>
-                    <td>{p.DaysHeld} days</td>
-                </tr>"));
-
-            positionsHtml = $@"
-                <h2>Current Positions</h2>
-                <table style='width: 100%; border-collapse: collapse;'>
-                    <tr style='background: #f5f5f5;'>
-                        <th style='padding: 10px; text-align: left;'>Symbol</th>
-                        <th style='padding: 10px; text-align: left;'>Qty</th>
-                        <th style='padding: 10px; text-align: left;'>Avg Cost</th>
-                        <th style='padding: 10px; text-align: left;'>Current</th>
-                        <th style='padding: 10px; text-align: left;'>P&L</th>
-                        <th style='padding: 10px; text-align: left;'>Held</th>
-                    </tr>
-                    {positionRows}
-                </table>";
-        }
-        else
-        {
-            positionsHtml = "<p><em>No open positions</em></p>";
-        }
+        var positionsHtml = BuildPositionsHtml(positions);
 
         var body = $@"
 <!DOCTYPE html>
@@ -178,6 +150,150 @@ public class EmailService : IEmailService
             </div>
             
             {positionsHtml}
+        </div>
+        
+        <div class='footer'>
+            <p>Azure Autonomous Trading System</p>
+            <p>Report generated at {etTime:h:mm tt} ET</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+        await SendEmailAsync(subject, body, isHtml: true);
+    }
+
+    public async Task SendWeeklySummaryAsync(
+        decimal portfolioValue,
+        decimal weeklyReturnPercent,
+        decimal totalReturnPercent,
+        int tradesThisWeek,
+        decimal weeklyProfitLoss)
+    {
+        var etTime = GetEasternTime();
+        var emoji = weeklyReturnPercent >= 0 ? "📈" : "📉";
+        var subject = $"{emoji} Weekly Portfolio Summary: {weeklyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
+
+        var body = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; }}
+        .metric {{ display: inline-block; margin: 10px 20px 10px 0; }}
+        .metric-value {{ font-size: 24px; font-weight: bold; }}
+        .metric-label {{ font-size: 12px; color: #666; }}
+        .positive {{ color: #28a745; }}
+        .negative {{ color: #dc3545; }}
+        .footer {{ background: #f1f1f1; padding: 15px; text-align: center; font-size: 12px; color: #666; border-radius: 0 0 8px 8px; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1 style='margin: 0;'>📊 Weekly Portfolio Summary</h1>
+            <p style='margin: 5px 0 0 0;'>Week ending {etTime:MMMM d, yyyy}</p>
+        </div>
+        
+        <div class='content'>
+            <div class='metric'>
+                <div class='metric-value'>${portfolioValue:N2}</div>
+                <div class='metric-label'>Portfolio Value</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value {(weeklyReturnPercent >= 0 ? "positive" : "negative")}'>{weeklyReturnPercent:+0.00;-0.00}%</div>
+                <div class='metric-label'>Weekly Return</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value {(totalReturnPercent >= 0 ? "positive" : "negative")}'>{totalReturnPercent:+0.00;-0.00}%</div>
+                <div class='metric-label'>Total Return</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value'>{tradesThisWeek}</div>
+                <div class='metric-label'>Trades This Week</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value {(weeklyProfitLoss >= 0 ? "positive" : "negative")}'>${weeklyProfitLoss:N2}</div>
+                <div class='metric-label'>Weekly P&L</div>
+            </div>
+        </div>
+        
+        <div class='footer'>
+            <p>Azure Autonomous Trading System</p>
+            <p>Report generated at {etTime:h:mm tt} ET</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+        await SendEmailAsync(subject, body, isHtml: true);
+    }
+
+    public async Task SendMonthlySummaryAsync(
+        decimal portfolioValue,
+        decimal monthlyReturnPercent,
+        decimal totalReturnPercent,
+        int tradesThisMonth,
+        decimal monthlyProfitLoss,
+        decimal azureCosts)
+    {
+        var etTime = GetEasternTime();
+        var emoji = monthlyReturnPercent >= 0 ? "📈" : "📉";
+        var netReturn = monthlyProfitLoss - azureCosts;
+        var subject = $"{emoji} Monthly Portfolio Summary: {monthlyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
+
+        var body = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; }}
+        .metric {{ display: inline-block; margin: 10px 20px 10px 0; }}
+        .metric-value {{ font-size: 24px; font-weight: bold; }}
+        .metric-label {{ font-size: 12px; color: #666; }}
+        .positive {{ color: #28a745; }}
+        .negative {{ color: #dc3545; }}
+        .cost-section {{ background: #fff3cd; padding: 15px; border-radius: 8px; margin-top: 15px; }}
+        .footer {{ background: #f1f1f1; padding: 15px; text-align: center; font-size: 12px; color: #666; border-radius: 0 0 8px 8px; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1 style='margin: 0;'>📊 Monthly Portfolio Summary</h1>
+            <p style='margin: 5px 0 0 0;'>{etTime:MMMM yyyy}</p>
+        </div>
+        
+        <div class='content'>
+            <div class='metric'>
+                <div class='metric-value'>${portfolioValue:N2}</div>
+                <div class='metric-label'>Portfolio Value</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value {(monthlyReturnPercent >= 0 ? "positive" : "negative")}'>{monthlyReturnPercent:+0.00;-0.00}%</div>
+                <div class='metric-label'>Monthly Return</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value {(totalReturnPercent >= 0 ? "positive" : "negative")}'>{totalReturnPercent:+0.00;-0.00}%</div>
+                <div class='metric-label'>Total Return</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value'>{tradesThisMonth}</div>
+                <div class='metric-label'>Trades This Month</div>
+            </div>
+            
+            <div class='cost-section'>
+                <h3 style='margin-top: 0;'>💰 Cost Analysis</h3>
+                <p><strong>Monthly P&L:</strong> <span class='{(monthlyProfitLoss >= 0 ? "positive" : "negative")}'>${monthlyProfitLoss:N2}</span></p>
+                <p><strong>Azure Costs:</strong> ${azureCosts:N2}</p>
+                <p><strong>Net Return:</strong> <span class='{(netReturn >= 0 ? "positive" : "negative")}'>${netReturn:N2}</span></p>
+            </div>
         </div>
         
         <div class='footer'>
@@ -245,6 +361,60 @@ public class EmailService : IEmailService
         await SendEmailAsync(subject, body, isHtml: true);
     }
 
+    public async Task SendErrorNotificationAsync(string functionName, string errorMessage, Exception? exception = null)
+    {
+        var subject = $"🔴 Error in {functionName}";
+
+        var exceptionDetails = "";
+        if (exception != null)
+        {
+            exceptionDetails = $@"
+                <h3>Exception Details</h3>
+                <p><strong>Type:</strong> {exception.GetType().Name}</p>
+                <p><strong>Message:</strong> {exception.Message}</p>
+                <pre style='background: #f5f5f5; padding: 10px; overflow-x: auto; font-size: 12px;'>{exception.StackTrace}</pre>";
+        }
+
+        var body = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: #dc3545; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; }}
+        .footer {{ background: #f1f1f1; padding: 15px; text-align: center; font-size: 12px; color: #666; border-radius: 0 0 8px 8px; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1 style='margin: 0;'>🔴 System Error</h1>
+            <p style='margin: 5px 0 0 0;'>Function: {functionName}</p>
+        </div>
+        
+        <div class='content'>
+            <h2>Error Message</h2>
+            <p style='background: #ffebee; padding: 15px; border-radius: 4px; border-left: 4px solid #dc3545;'>{errorMessage}</p>
+            
+            {exceptionDetails}
+            
+            <p><strong>Time:</strong> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>
+        </div>
+        
+        <div class='footer'>
+            <p>Azure Autonomous Trading System</p>
+            <p>Please investigate this error promptly.</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+        await SendEmailAsync(subject, body, isHtml: true);
+    }
+
     public async Task SendTradeNotificationAsync(
         string tradeType,
         string symbol,
@@ -259,7 +429,7 @@ public class EmailService : IEmailService
         var subject = $"{emoji} Trade Executed: {tradeType.ToUpper()} {quantity} {symbol} @ ${price:N2}";
 
         var reasonHtml = !string.IsNullOrEmpty(reason)
-            ? $"<p><strong>Reason:</strong> {reason}</p>"
+            ? $"<div class='trade-detail'><span><strong>Reason:</strong></span><span>{reason}</span></div>"
             : "";
 
         var body = $@"
@@ -316,4 +486,64 @@ public class EmailService : IEmailService
 
         await SendEmailAsync(subject, body, isHtml: true);
     }
+
+    #region Helper Methods
+
+    private DateTime GetEasternTime()
+    {
+        try
+        {
+            return TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.UtcNow,
+                TimeZoneInfo.FindSystemTimeZoneById("America/New_York"));
+        }
+        catch
+        {
+            // Fallback for Linux
+            try
+            {
+                return TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTime.UtcNow,
+                    TimeZoneInfo.FindSystemTimeZoneById("US/Eastern"));
+            }
+            catch
+            {
+                return DateTime.UtcNow;
+            }
+        }
+    }
+
+    private string BuildPositionsHtml(IEnumerable<PositionSummary>? positions)
+    {
+        if (positions == null || !positions.Any())
+        {
+            return "<p><em>No open positions</em></p>";
+        }
+
+        var positionRows = string.Join("\n", positions.Select(p => $@"
+            <tr>
+                <td><strong>{p.Symbol}</strong></td>
+                <td>{p.Quantity}</td>
+                <td>${p.AverageCost:N2}</td>
+                <td>${p.CurrentPrice:N2}</td>
+                <td style='color: {(p.UnrealizedPL >= 0 ? "green" : "red")}'>${p.UnrealizedPL:N2} ({p.UnrealizedPLPercent:+0.00;-0.00}%)</td>
+                <td>{p.DaysHeld} days</td>
+            </tr>"));
+
+        return $@"
+            <h2>Current Positions</h2>
+            <table style='width: 100%; border-collapse: collapse;'>
+                <tr style='background: #f5f5f5;'>
+                    <th style='padding: 10px; text-align: left;'>Symbol</th>
+                    <th style='padding: 10px; text-align: left;'>Qty</th>
+                    <th style='padding: 10px; text-align: left;'>Avg Cost</th>
+                    <th style='padding: 10px; text-align: left;'>Current</th>
+                    <th style='padding: 10px; text-align: left;'>P&L</th>
+                    <th style='padding: 10px; text-align: left;'>Held</th>
+                </tr>
+                {positionRows}
+            </table>";
+    }
+
+    #endregion
 }
