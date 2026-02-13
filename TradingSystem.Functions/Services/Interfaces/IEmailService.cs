@@ -11,6 +11,12 @@ public interface IEmailService
     Task SendEmailAsync(string subject, string body, bool isHtml = false);
 
     /// <summary>
+    /// Send a summary email with custom subject and HTML body.
+    /// Used by DailyPortfolioSummary function.
+    /// </summary>
+    Task SendSummaryEmailAsync(string subject, string htmlBody);
+
+    /// <summary>
     /// Send a daily portfolio summary email.
     /// </summary>
     Task SendDailySummaryAsync(
@@ -23,44 +29,57 @@ public interface IEmailService
     /// <summary>
     /// Send a weekly portfolio summary email.
     /// </summary>
+    /// <param name="portfolioValue">Current portfolio value</param>
+    /// <param name="weeklyReturnPercent">Weekly return percentage</param>
+    /// <param name="totalReturnPercent">Total return since inception</param>
+    /// <param name="tradesThisWeek">Number of trades this week</param>
+    /// <param name="winRate">Win rate percentage</param>
     Task SendWeeklySummaryAsync(
         decimal portfolioValue,
         decimal weeklyReturnPercent,
         decimal totalReturnPercent,
         int tradesThisWeek,
-        decimal weeklyProfitLoss);
+        decimal winRate);
 
     /// <summary>
     /// Send a monthly portfolio summary email.
     /// </summary>
+    /// <param name="portfolioValue">Current portfolio value</param>
+    /// <param name="monthlyReturnPercent">Monthly return percentage</param>
+    /// <param name="totalReturnPercent">Total return since inception</param>
+    /// <param name="sharpeRatio">Sharpe ratio</param>
+    /// <param name="maxDrawdownPercent">Maximum drawdown percentage</param>
+    /// <param name="tradesThisMonth">Number of trades this month</param>
+    /// <param name="azureCosts">Azure infrastructure costs</param>
     Task SendMonthlySummaryAsync(
         decimal portfolioValue,
         decimal monthlyReturnPercent,
         decimal totalReturnPercent,
+        decimal sharpeRatio,
+        decimal maxDrawdownPercent,
         int tradesThisMonth,
-        decimal monthlyProfitLoss,
         decimal azureCosts);
 
     /// <summary>
-    /// Send a generic summary email (used by DailyPortfolioSummary function).
+    /// Send a risk/system alert email.
     /// </summary>
-    Task SendSummaryEmailAsync(string subject, string htmlBody);
+    /// <param name="title">Alert title</param>
+    /// <param name="message">Alert message body</param>
+    /// <param name="priority">Priority level: "CRITICAL", "HIGH", "MEDIUM", "LOW"</param>
+    Task SendAlertAsync(string title, string message, string priority);
 
     /// <summary>
-    /// Send a risk alert email.
+    /// Send an error notification email (single message).
     /// </summary>
-    /// <param name="alertType">Type of alert (Warning, Critical, etc.)</param>
-    /// <param name="message">Alert message</param>
-    /// <param name="currentDrawdown">Current drawdown percentage (optional)</param>
-    Task SendAlertAsync(string alertType, string message, decimal? currentDrawdown = null);
-
-    /// <summary>
-    /// Send an error notification email.
-    /// </summary>
-    /// <param name="functionName">Name of the function that failed</param>
     /// <param name="errorMessage">Error message</param>
-    /// <param name="exception">Optional exception details</param>
-    Task SendErrorNotificationAsync(string functionName, string errorMessage, Exception? exception = null);
+    Task SendErrorNotificationAsync(string errorMessage);
+
+    /// <summary>
+    /// Send an error notification email with exception details.
+    /// </summary>
+    /// <param name="errorMessage">Error message</param>
+    /// <param name="exception">Exception that occurred</param>
+    Task SendErrorNotificationAsync(string errorMessage, Exception exception);
 
     /// <summary>
     /// Send a trade notification email.

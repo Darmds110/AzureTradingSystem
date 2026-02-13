@@ -46,6 +46,8 @@ public class EmailService : IEmailService
             _fromAddress, _toAddress, _smtpServer, _smtpPort);
     }
 
+    #region Core Email Methods
+
     public async Task SendEmailAsync(string subject, string body, bool isHtml = false)
     {
         var message = new MimeMessage();
@@ -69,7 +71,6 @@ public class EmailService : IEmailService
         {
             _logger.LogInformation("Connecting to SMTP server {Server}:{Port}...", _smtpServer, _smtpPort);
 
-            // Connect with STARTTLS
             await client.ConnectAsync(_smtpServer, _smtpPort, SecureSocketOptions.StartTls);
 
             _logger.LogInformation("Authenticating with SMTP server...");
@@ -88,8 +89,166 @@ public class EmailService : IEmailService
 
     public async Task SendSummaryEmailAsync(string subject, string htmlBody)
     {
-        await SendEmailAsync(subject, htmlBody, isHtml: true);
+        var wrappedBody = WrapInEmailTemplate(htmlBody);
+        await SendEmailAsync(subject, wrappedBody, isHtml: true);
     }
+
+    #endregion
+
+    #region Alert Methods
+
+    /// <summary>
+    /// Send alert with string priority (CRITICAL, HIGH, MEDIUM, LOW)
+    /// </summary>
+    public async Task SendAlertAsync(string title, string message, string priority)
+    {
+        var emoji = priority.ToUpper() switch
+        {
+            "CRITICAL" => "🚨",
+            "HIGH" => "⚠️",
+            "MEDIUM" => "📢",
+            "LOW" => "ℹ️",
+            _ => "📢"
+        };
+
+        var color = priority.ToUpper() switch
+        {
+            "CRITICAL" => "#dc3545",
+            "HIGH" => "#fd7e14",
+            "MEDIUM" => "#ffc107",
+            "LOW" => "#17a2b8",
+            _ => "#6c757d"
+        };
+
+        var subject = $"{emoji} [{priority.ToUpper()}] {title}";
+
+        var body = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .alert-header {{ background: {color}; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 8px 8px; }}
+        .message {{ white-space: pre-wrap; background: #fff; padding: 15px; border-radius: 4px; border-left: 4px solid {color}; }}
+        .footer {{ margin-top: 20px; font-size: 12px; color: #666; text-align: center; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='alert-header'>
+            <h1 style='margin: 0;'>{emoji} {title}</h1>
+            <p style='margin: 5px 0 0 0;'>Priority: {priority.ToUpper()}</p>
+        </div>
+        
+        <div class='content'>
+            <div class='message'>{message}</div>
+            <p class='footer'>Time: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC<br/>Azure Autonomous Trading System</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+        await SendEmailAsync(subject, body, isHtml: true);
+    }
+
+    #endregion
+
+    #region Error Notification Methods
+
+    /// <summary>
+    /// Send error notification with just a message
+    /// </summary>
+    public async Task SendErrorNotificationAsync(string errorMessage)
+    {
+        var subject = "🔴 Trading System Error";
+
+        var body = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: #dc3545; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 8px 8px; }}
+        .error-box {{ background: #ffebee; padding: 15px; border-radius: 4px; border-left: 4px solid #dc3545; }}
+        .footer {{ margin-top: 20px; font-size: 12px; color: #666; text-align: center; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1 style='margin: 0;'>🔴 System Error</h1>
+        </div>
+        
+        <div class='content'>
+            <div class='error-box'>
+                <p>{errorMessage}</p>
+            </div>
+            <p class='footer'>Time: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC<br/>Please investigate this error.</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+        await SendEmailAsync(subject, body, isHtml: true);
+    }
+
+    /// <summary>
+    /// Send error notification with message and exception
+    /// </summary>
+    public async Task SendErrorNotificationAsync(string errorMessage, Exception exception)
+    {
+        var subject = "🔴 Trading System Error";
+
+        var body = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: #dc3545; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 8px 8px; }}
+        .error-box {{ background: #ffebee; padding: 15px; border-radius: 4px; border-left: 4px solid #dc3545; margin-bottom: 15px; }}
+        .exception {{ background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }}
+        .exception pre {{ margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px; }}
+        .footer {{ margin-top: 20px; font-size: 12px; color: #666; text-align: center; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1 style='margin: 0;'>🔴 System Error</h1>
+        </div>
+        
+        <div class='content'>
+            <div class='error-box'>
+                <p><strong>Error:</strong> {errorMessage}</p>
+            </div>
+            
+            <h3>Exception Details</h3>
+            <p><strong>Type:</strong> {exception.GetType().Name}</p>
+            <p><strong>Message:</strong> {exception.Message}</p>
+            
+            <div class='exception'>
+                <pre>{exception.StackTrace ?? "No stack trace available"}</pre>
+            </div>
+            
+            <p class='footer'>Time: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC<br/>Please investigate this error promptly.</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+        await SendEmailAsync(subject, body, isHtml: true);
+    }
+
+    #endregion
+
+    #region Summary Email Methods
 
     public async Task SendDailySummaryAsync(
         decimal portfolioValue,
@@ -99,7 +258,6 @@ public class EmailService : IEmailService
         IEnumerable<PositionSummary>? positions = null)
     {
         var etTime = GetEasternTime();
-
         var emoji = dailyReturnPercent >= 0 ? "📈" : "📉";
         var subject = $"{emoji} Daily Portfolio Summary: {dailyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
 
@@ -168,11 +326,11 @@ public class EmailService : IEmailService
         decimal weeklyReturnPercent,
         decimal totalReturnPercent,
         int tradesThisWeek,
-        decimal weeklyProfitLoss)
+        decimal winRate)
     {
         var etTime = GetEasternTime();
         var emoji = weeklyReturnPercent >= 0 ? "📈" : "📉";
-        var subject = $"{emoji} Weekly Portfolio Summary: {weeklyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
+        var subject = $"{emoji} Weekly Summary: {weeklyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
 
         var body = $@"
 <!DOCTYPE html>
@@ -216,8 +374,8 @@ public class EmailService : IEmailService
                 <div class='metric-label'>Trades This Week</div>
             </div>
             <div class='metric'>
-                <div class='metric-value {(weeklyProfitLoss >= 0 ? "positive" : "negative")}'>${weeklyProfitLoss:N2}</div>
-                <div class='metric-label'>Weekly P&L</div>
+                <div class='metric-value'>{winRate:0.0}%</div>
+                <div class='metric-label'>Win Rate</div>
             </div>
         </div>
         
@@ -236,14 +394,14 @@ public class EmailService : IEmailService
         decimal portfolioValue,
         decimal monthlyReturnPercent,
         decimal totalReturnPercent,
+        decimal sharpeRatio,
+        decimal maxDrawdownPercent,
         int tradesThisMonth,
-        decimal monthlyProfitLoss,
         decimal azureCosts)
     {
         var etTime = GetEasternTime();
         var emoji = monthlyReturnPercent >= 0 ? "📈" : "📉";
-        var netReturn = monthlyProfitLoss - azureCosts;
-        var subject = $"{emoji} Monthly Portfolio Summary: {monthlyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
+        var subject = $"{emoji} Monthly Summary: {monthlyReturnPercent:+0.00;-0.00}% | ${portfolioValue:N2}";
 
         var body = $@"
 <!DOCTYPE html>
@@ -284,15 +442,21 @@ public class EmailService : IEmailService
                 <div class='metric-label'>Total Return</div>
             </div>
             <div class='metric'>
+                <div class='metric-value'>{sharpeRatio:0.00}</div>
+                <div class='metric-label'>Sharpe Ratio</div>
+            </div>
+            <div class='metric'>
+                <div class='metric-value negative'>{maxDrawdownPercent:0.00}%</div>
+                <div class='metric-label'>Max Drawdown</div>
+            </div>
+            <div class='metric'>
                 <div class='metric-value'>{tradesThisMonth}</div>
                 <div class='metric-label'>Trades This Month</div>
             </div>
             
             <div class='cost-section'>
                 <h3 style='margin-top: 0;'>💰 Cost Analysis</h3>
-                <p><strong>Monthly P&L:</strong> <span class='{(monthlyProfitLoss >= 0 ? "positive" : "negative")}'>${monthlyProfitLoss:N2}</span></p>
                 <p><strong>Azure Costs:</strong> ${azureCosts:N2}</p>
-                <p><strong>Net Return:</strong> <span class='{(netReturn >= 0 ? "positive" : "negative")}'>${netReturn:N2}</span></p>
             </div>
         </div>
         
@@ -307,113 +471,9 @@ public class EmailService : IEmailService
         await SendEmailAsync(subject, body, isHtml: true);
     }
 
-    public async Task SendAlertAsync(string alertType, string message, decimal? currentDrawdown = null)
-    {
-        var emoji = alertType.ToUpper() switch
-        {
-            "CRITICAL" => "🚨",
-            "WARNING" => "⚠️",
-            "INFO" => "ℹ️",
-            _ => "📢"
-        };
+    #endregion
 
-        var color = alertType.ToUpper() switch
-        {
-            "CRITICAL" => "#dc3545",
-            "WARNING" => "#ffc107",
-            "INFO" => "#17a2b8",
-            _ => "#6c757d"
-        };
-
-        var subject = $"{emoji} [{alertType.ToUpper()}] Trading System Alert";
-
-        var drawdownHtml = currentDrawdown.HasValue
-            ? $"<p><strong>Current Drawdown:</strong> {currentDrawdown:0.00}%</p>"
-            : "";
-
-        var body = $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-        .alert {{ background: {color}; color: white; padding: 20px; border-radius: 8px; }}
-        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; margin-top: 15px; border-radius: 8px; }}
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <div class='alert'>
-            <h1 style='margin: 0;'>{emoji} {alertType.ToUpper()} ALERT</h1>
-        </div>
-        
-        <div class='content'>
-            <h2>Alert Details</h2>
-            <p>{message}</p>
-            {drawdownHtml}
-            <p><strong>Time:</strong> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>
-        </div>
-    </div>
-</body>
-</html>";
-
-        await SendEmailAsync(subject, body, isHtml: true);
-    }
-
-    public async Task SendErrorNotificationAsync(string functionName, string errorMessage, Exception? exception = null)
-    {
-        var subject = $"🔴 Error in {functionName}";
-
-        var exceptionDetails = "";
-        if (exception != null)
-        {
-            exceptionDetails = $@"
-                <h3>Exception Details</h3>
-                <p><strong>Type:</strong> {exception.GetType().Name}</p>
-                <p><strong>Message:</strong> {exception.Message}</p>
-                <pre style='background: #f5f5f5; padding: 10px; overflow-x: auto; font-size: 12px;'>{exception.StackTrace}</pre>";
-        }
-
-        var body = $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-        .header {{ background: #dc3545; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
-        .content {{ background: #f9f9f9; padding: 20px; border: 1px solid #ddd; }}
-        .footer {{ background: #f1f1f1; padding: 15px; text-align: center; font-size: 12px; color: #666; border-radius: 0 0 8px 8px; }}
-        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <div class='header'>
-            <h1 style='margin: 0;'>🔴 System Error</h1>
-            <p style='margin: 5px 0 0 0;'>Function: {functionName}</p>
-        </div>
-        
-        <div class='content'>
-            <h2>Error Message</h2>
-            <p style='background: #ffebee; padding: 15px; border-radius: 4px; border-left: 4px solid #dc3545;'>{errorMessage}</p>
-            
-            {exceptionDetails}
-            
-            <p><strong>Time:</strong> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>
-        </div>
-        
-        <div class='footer'>
-            <p>Azure Autonomous Trading System</p>
-            <p>Please investigate this error promptly.</p>
-        </div>
-    </div>
-</body>
-</html>";
-
-        await SendEmailAsync(subject, body, isHtml: true);
-    }
+    #region Trade Notification
 
     public async Task SendTradeNotificationAsync(
         string tradeType,
@@ -487,6 +547,8 @@ public class EmailService : IEmailService
         await SendEmailAsync(subject, body, isHtml: true);
     }
 
+    #endregion
+
     #region Helper Methods
 
     private DateTime GetEasternTime()
@@ -499,7 +561,6 @@ public class EmailService : IEmailService
         }
         catch
         {
-            // Fallback for Linux
             try
             {
                 return TimeZoneInfo.ConvertTimeFromUtc(
@@ -543,6 +604,27 @@ public class EmailService : IEmailService
                 </tr>
                 {positionRows}
             </table>";
+    }
+
+    private string WrapInEmailTemplate(string content)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
+        h2 {{ color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; }}
+        h3 {{ color: #555; }}
+        table {{ border-collapse: collapse; margin: 10px 0; }}
+        th, td {{ padding: 8px; text-align: left; }}
+        hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
+    </style>
+</head>
+<body>
+    {content}
+</body>
+</html>";
     }
 
     #endregion
