@@ -1,7 +1,7 @@
 ﻿namespace TradingSystem.Functions.Services.Interfaces;
 
 /// <summary>
-/// Interface for email notification service.
+/// Interface for email notification service using Azure Communication Services.
 /// </summary>
 public interface IEmailService
 {
@@ -29,11 +29,6 @@ public interface IEmailService
     /// <summary>
     /// Send a weekly portfolio summary email.
     /// </summary>
-    /// <param name="portfolioValue">Current portfolio value</param>
-    /// <param name="weeklyReturnPercent">Weekly return percentage</param>
-    /// <param name="totalReturnPercent">Total return since inception</param>
-    /// <param name="tradesThisWeek">Number of trades this week</param>
-    /// <param name="winRate">Win rate percentage</param>
     Task SendWeeklySummaryAsync(
         decimal portfolioValue,
         decimal weeklyReturnPercent,
@@ -44,13 +39,6 @@ public interface IEmailService
     /// <summary>
     /// Send a monthly portfolio summary email.
     /// </summary>
-    /// <param name="portfolioValue">Current portfolio value</param>
-    /// <param name="monthlyReturnPercent">Monthly return percentage</param>
-    /// <param name="totalReturnPercent">Total return since inception</param>
-    /// <param name="sharpeRatio">Sharpe ratio</param>
-    /// <param name="maxDrawdownPercent">Maximum drawdown percentage</param>
-    /// <param name="tradesThisMonth">Number of trades this month</param>
-    /// <param name="azureCosts">Azure infrastructure costs</param>
     Task SendMonthlySummaryAsync(
         decimal portfolioValue,
         decimal monthlyReturnPercent,
@@ -71,14 +59,11 @@ public interface IEmailService
     /// <summary>
     /// Send an error notification email (single message).
     /// </summary>
-    /// <param name="errorMessage">Error message</param>
     Task SendErrorNotificationAsync(string errorMessage);
 
     /// <summary>
     /// Send an error notification email with exception details.
     /// </summary>
-    /// <param name="errorMessage">Error message</param>
-    /// <param name="exception">Exception that occurred</param>
     Task SendErrorNotificationAsync(string errorMessage, Exception exception);
 
     /// <summary>

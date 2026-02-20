@@ -9,6 +9,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Alpaca.Markets" Version="7.0.5" />
+    <PackageReference Include="Azure.Communication.Email" Version="1.1.0" />
     <PackageReference Include="Azure.Data.Tables" Version="12.8.3" />
     <PackageReference Include="MailKit" Version="4.3.0" />
     <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="2.22.0" />

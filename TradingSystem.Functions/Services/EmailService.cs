@@ -1,89 +1,75 @@
-﻿using MailKit.Net.Smtp;
-using MailKit.Security;
+﻿using Azure;
+using Azure.Communication.Email;
 using Microsoft.Extensions.Logging;
-using MimeKit;
 using TradingSystem.Functions.Services.Interfaces;
 
 namespace TradingSystem.Functions.Services;
 
 /// <summary>
-/// Email service implementation using MailKit and Outlook SMTP.
+/// Email service implementation using Azure Communication Services.
 /// </summary>
 public class EmailService : IEmailService
 {
     private readonly ILogger<EmailService> _logger;
-    private readonly string _smtpServer;
-    private readonly int _smtpPort;
-    private readonly string _smtpUsername;
-    private readonly string _smtpPassword;
-    private readonly string _fromAddress;
-    private readonly string _toAddress;
+    private readonly EmailClient _emailClient;
+    private readonly string _senderAddress;
+    private readonly string _recipientAddress;
 
     public EmailService(ILogger<EmailService> logger)
     {
         _logger = logger;
 
         // Read configuration from environment variables
-        _smtpServer = Environment.GetEnvironmentVariable("EmailSmtpServer")
-            ?? throw new InvalidOperationException("EmailSmtpServer environment variable not set");
+        var connectionString = Environment.GetEnvironmentVariable("CommServiceConnectionString")
+            ?? throw new InvalidOperationException("CommServiceConnectionString environment variable not set");
 
-        var portString = Environment.GetEnvironmentVariable("EmailSmtpPort") ?? "587";
-        _smtpPort = int.Parse(portString);
-
-        _smtpUsername = Environment.GetEnvironmentVariable("EmailSmtpUsername")
-            ?? throw new InvalidOperationException("EmailSmtpUsername environment variable not set");
-
-        _smtpPassword = Environment.GetEnvironmentVariable("EmailSmtpPassword")
-            ?? throw new InvalidOperationException("EmailSmtpPassword environment variable not set");
-
-        _fromAddress = Environment.GetEnvironmentVariable("EmailFromAddress")
+        _senderAddress = Environment.GetEnvironmentVariable("EmailFromAddress")
             ?? throw new InvalidOperationException("EmailFromAddress environment variable not set");
 
-        _toAddress = Environment.GetEnvironmentVariable("EmailToAddress")
+        _recipientAddress = Environment.GetEnvironmentVariable("EmailToAddress")
             ?? throw new InvalidOperationException("EmailToAddress environment variable not set");
 
-        _logger.LogInformation("EmailService initialized. From: {From}, To: {To}, Server: {Server}:{Port}",
-            _fromAddress, _toAddress, _smtpServer, _smtpPort);
+        _emailClient = new EmailClient(connectionString);
+
+        _logger.LogInformation("EmailService initialized with Azure Communication Services. From: {From}, To: {To}",
+            _senderAddress, _recipientAddress);
     }
 
     #region Core Email Methods
 
     public async Task SendEmailAsync(string subject, string body, bool isHtml = false)
     {
-        var message = new MimeMessage();
-        message.From.Add(new MailboxAddress("Trading System", _fromAddress));
-        message.To.Add(new MailboxAddress("", _toAddress));
-        message.Subject = subject;
-
-        var bodyBuilder = new BodyBuilder();
-        if (isHtml)
-        {
-            bodyBuilder.HtmlBody = body;
-        }
-        else
-        {
-            bodyBuilder.TextBody = body;
-        }
-        message.Body = bodyBuilder.ToMessageBody();
-
-        using var client = new SmtpClient();
         try
         {
-            _logger.LogInformation("Connecting to SMTP server {Server}:{Port}...", _smtpServer, _smtpPort);
-
-            await client.ConnectAsync(_smtpServer, _smtpPort, SecureSocketOptions.StartTls);
-
-            _logger.LogInformation("Authenticating with SMTP server...");
-            await client.AuthenticateAsync(_smtpUsername, _smtpPassword);
-
             _logger.LogInformation("Sending email: {Subject}", subject);
-            await client.SendAsync(message);
 
-            _logger.LogInformation("Email sent successfully to {To}", _toAddress);
+            var emailContent = new EmailContent(subject);
+            if (isHtml)
+            {
+                emailContent.Html = body;
+            }
+            else
+            {
+                emailContent.PlainText = body;
+            }
+
+            var emailMessage = new EmailMessage(
+                senderAddress: _senderAddress,
+                recipientAddress: _recipientAddress,
+                content: emailContent);
+
+            var emailSendOperation = await _emailClient.SendAsync(
+                WaitUntil.Completed,
+                emailMessage);
+
+            _logger.LogInformation("Email sent successfully. Operation ID: {OperationId}, Status: {Status}",
+                emailSendOperation.Id, emailSendOperation.Value.Status);
         }
-        finally
+        catch (RequestFailedException ex)
         {
-            await client.DisconnectAsync(true);
+            _logger.LogError(ex, "Azure Communication Services error sending email. Status: {Status}, Code: {Code}",
+                ex.Status, ex.ErrorCode);
+            throw;
         }
     }
 
@@ -97,9 +83,6 @@ public class EmailService : IEmailService
 
     #region Alert Methods
 
-    /// <summary>
-    /// Send alert with string priority (CRITICAL, HIGH, MEDIUM, LOW)
-    /// </summary>
     public async Task SendAlertAsync(string title, string message, string priority)
     {
         var emoji = priority.ToUpper() switch
@@ -157,9 +140,6 @@ public class EmailService : IEmailService
 
     #region Error Notification Methods
 
-    /// <summary>
-    /// Send error notification with just a message
-    /// </summary>
     public async Task SendErrorNotificationAsync(string errorMessage)
     {
         var subject = "🔴 Trading System Error";
@@ -196,9 +176,6 @@ public class EmailService : IEmailService
         await SendEmailAsync(subject, body, isHtml: true);
     }
 
-    /// <summary>
-    /// Send error notification with message and exception
-    /// </summary>
     public async Task SendErrorNotificationAsync(string errorMessage, Exception exception)
     {
         var subject = "🔴 Trading System Error";
